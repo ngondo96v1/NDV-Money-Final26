@@ -376,7 +376,7 @@ const AdminSystem: React.FC<AdminSystemProps> = ({ onReset, onImportSuccess, onB
                 <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Supabase URL</label>
                 <input 
                   type="text" 
-                  value={localSettings.SUPABASE_URL}
+                  value={localSettings.SUPABASE_URL || ''}
                   onChange={(e) => setLocalSettings({...localSettings, SUPABASE_URL: e.target.value})}
                   className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
                 />
@@ -385,7 +385,7 @@ const AdminSystem: React.FC<AdminSystemProps> = ({ onReset, onImportSuccess, onB
                 <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Supabase Service Role Key</label>
                 <input 
                   type="password" 
-                  value={localSettings.SUPABASE_SERVICE_ROLE_KEY}
+                  value={localSettings.SUPABASE_SERVICE_ROLE_KEY || ''}
                   onChange={(e) => setLocalSettings({...localSettings, SUPABASE_SERVICE_ROLE_KEY: e.target.value})}
                   className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
                 />
@@ -399,7 +399,7 @@ const AdminSystem: React.FC<AdminSystemProps> = ({ onReset, onImportSuccess, onB
                 <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">ImgBB API Key</label>
                 <input 
                   type="text" 
-                  value={localSettings.IMGBB_API_KEY}
+                  value={localSettings.IMGBB_API_KEY || ''}
                   onChange={(e) => setLocalSettings({...localSettings, IMGBB_API_KEY: e.target.value})}
                   className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
                 />
@@ -422,7 +422,7 @@ const AdminSystem: React.FC<AdminSystemProps> = ({ onReset, onImportSuccess, onB
                   <input 
                     type="text" 
                     inputMode="numeric"
-                    value={localSettings.PAYMENT_ACCOUNT.accountNumber}
+                    value={localSettings.PAYMENT_ACCOUNT?.accountNumber || ''}
                     onChange={(e) => setLocalSettings({
                       ...localSettings, 
                       PAYMENT_ACCOUNT: { ...localSettings.PAYMENT_ACCOUNT, accountNumber: e.target.value.replace(/\D/g, '') }
@@ -433,7 +433,7 @@ const AdminSystem: React.FC<AdminSystemProps> = ({ onReset, onImportSuccess, onB
                 <div className="flex gap-2">
                   <input 
                     type="text" 
-                    value={localSettings.PAYMENT_ACCOUNT.accountName}
+                    value={localSettings.PAYMENT_ACCOUNT?.accountName || ''}
                     onChange={(e) => setLocalSettings({
                       ...localSettings, 
                       PAYMENT_ACCOUNT: { ...localSettings.PAYMENT_ACCOUNT, accountName: e.target.value.toUpperCase() }
@@ -483,7 +483,7 @@ const AdminSystem: React.FC<AdminSystemProps> = ({ onReset, onImportSuccess, onB
                   <input 
                     type="text" 
                     inputMode="decimal"
-                    value={localSettings.FINE_RATE}
+                    value={localSettings.FINE_RATE || ''}
                     onChange={(e) => {
                       const val = e.target.value;
                       if (val === '' || /^[0-9]*\.?[0-9]*$/.test(val)) {
