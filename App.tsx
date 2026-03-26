@@ -1,0 +1,2142 @@
+
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { AppView, User, UserRank, LoanRecord, Notification, MonthlyStat, AppSettings } from './types';
+import Login from './components/Login';
+import Register from './components/Register';
+import Dashboard from './components/Dashboard';
+import LoanApplication from './components/LoanApplication';
+import RankLimits from './components/RankLimits';
+import Profile from './components/Profile';
+import SecurityModal from './components/SecurityModal';
+import TermsModal from './components/TermsModal';
+import BankInfoModal from './components/BankInfoModal';
+import EditProfileModal from './components/EditProfileModal';
+import AdminDashboard from './components/AdminDashboard';
+import AdminUserManagement from './components/AdminUserManagement';
+import AdminBudget from './components/AdminBudget';
+import AdminSystem from './components/AdminSystem';
+import { User as UserIcon, Home, Briefcase, Medal, LayoutGrid, Users, Wallet, AlertTriangle, X, Database, Settings, RefreshCcw } from 'lucide-react';
+import { compressImage, generateContractId, uploadToImgBB } from './utils';
+import BankUpdateWarning from './components/BankUpdateWarning';
+import DatabaseErrorModal from './components/DatabaseErrorModal';
+import { io, Socket } from 'socket.io-client';
+
+interface ErrorBoundaryProps {
+  children?: React.ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+}
+
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  public state: ErrorBoundaryState;
+  public props: ErrorBoundaryProps;
+
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.props = props;
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(_error: any): ErrorBoundaryState { 
+    return { hasError: true }; 
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="h-[100dvh] bg-black flex flex-col items-center justify-center p-8 text-center">
+          <AlertTriangle size={48} className="text-[#ff8c00] mb-4" />
+          <h2 className="text-xl font-black uppercase mb-2 text-white">Hệ thống đang bảo trì</h2>
+          <p className="text-xs text-gray-500 mb-6 uppercase">Đã xảy ra lỗi khởi tạo. Vui lòng tải lại trang.</p>
+          <button onClick={() => window.location.reload()} className="px-8 py-4 bg-[#ff8c00] text-black font-black rounded-full text-[10px] uppercase tracking-widest">Tải lại trang</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+const App: React.FC = () => {
+  const [currentView, setCurrentView] = useState<AppView>(AppView.LOGIN);
+  const [settleLoanFromDash, setSettleLoanFromDash] = useState<LoanRecord | null>(null);
+  const [viewLoanFromDash, setViewLoanFromDash] = useState<LoanRecord | null>(null);
+  const [user, setUser] = useState<User | null>(() => {
+    const saved = localStorage.getItem('vnv_user');
+    if (saved && saved !== 'null' && saved !== '') {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return null;
+      }
+    }
+    return null;
+  });
+  const [token, setToken] = useState<string | null>(() => {
+    return localStorage.getItem('vnv_token');
+  });
+
+  const handleLogout = () => {
+    setUser(null);
+    setToken(null);
+    localStorage.removeItem('vnv_user');
+    localStorage.removeItem('vnv_token');
+    setCurrentView(AppView.LOGIN);
+  };
+
+  const authenticatedFetch = async (url: string, options: RequestInit = {}) => {
+    if (!token && !url.includes('/api/login') && !url.includes('/api/register')) {
+      return new Response(JSON.stringify({ error: "Yêu cầu xác thực" }), { status: 401 });
+    }
+
+    const headers = {
+      ...options.headers,
+      'Authorization': token ? `Bearer ${token}` : '',
+      'Content-Type': options.body ? 'application/json' : (options.headers as any)?.['Content-Type'] || undefined,
+    };
+    
+    // Remove Content-Type if it's undefined
+    if (!headers['Content-Type']) delete (headers as any)['Content-Type'];
+
+    const response = await fetch(url, { ...options, headers });
+    
+    if (response.status === 401 || response.status === 403) {
+      // Don't logout if we're already on the login page or if it's a login attempt
+      if (currentView !== AppView.LOGIN && !url.includes('/api/login')) {
+        handleLogout();
+      }
+    }
+    
+    return response;
+  };
+  const [loans, setLoans] = useState<LoanRecord[]>(() => {
+    const saved = localStorage.getItem('ndv_loans');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [registeredUsers, setRegisteredUsers] = useState<User[]>(() => {
+    const saved = localStorage.getItem('ndv_users');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [notifications, setNotifications] = useState<Notification[]>(() => {
+    const saved = localStorage.getItem('ndv_notifications');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [systemBudget, setSystemBudget] = useState<number>(() => {
+    const saved = localStorage.getItem('ndv_budget');
+    return saved ? Number(saved) : 30000000;
+  }); 
+  const [rankProfit, setRankProfit] = useState<number>(() => {
+    const saved = localStorage.getItem('ndv_rank_profit');
+    return saved ? Number(saved) : 0;
+  }); 
+  const [loanProfit, setLoanProfit] = useState<number>(() => {
+    const saved = localStorage.getItem('ndv_loan_profit');
+    return saved ? Number(saved) : 0;
+  }); 
+  const [monthlyStats, setMonthlyStats] = useState<MonthlyStat[]>(() => {
+    const saved = localStorage.getItem('ndv_monthly_stats');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [lastKeepAlive, setLastKeepAlive] = useState<string | null>(() => {
+    return localStorage.getItem('ndv_last_keep_alive');
+  });
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [registerError, setRegisterError] = useState<string | null>(null);
+  const [rememberMe, setRememberMe] = useState(() => {
+    const saved = localStorage.getItem('vnv_remember');
+    return saved === null ? true : saved === 'true';
+  });
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [showBankWarning, setShowBankWarning] = useState(false);
+  const [storageFull, setStorageFull] = useState(false);
+  const [storageUsage, setStorageUsage] = useState('0');
+  const [isGlobalProcessing, setIsGlobalProcessing] = useState(false);
+  const [dbError, setDbError] = useState<string | null>(null);
+  const isProcessingRef = useRef(false);
+  const lastActionTimestamp = useRef<number>(0);
+  const lastFullFetch = useRef<number>(0);
+  const lastSyncTimestamp = useRef<number>(0);
+  const socketRef = useRef<Socket | null>(null);
+  const [isTabActive, setIsTabActive] = useState(true);
+  const [showSecurityModal, setShowSecurityModal] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [showBankInfoModal, setShowBankInfoModal] = useState(false);
+  const [showEditProfileModal, setShowEditProfileModal] = useState(false);
+  const [settings, setSettings] = useState<AppSettings>({
+    SUPABASE_URL: '',
+    SUPABASE_SERVICE_ROLE_KEY: '',
+    IMGBB_API_KEY: '',
+    PAYMENT_ACCOUNT: { bankName: '', accountNumber: '', accountName: '' },
+    PRE_DISBURSEMENT_FEE: '',
+    MAX_EXTENSIONS: '',
+    UPGRADE_PERCENT: ''
+  });
+
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const response = await authenticatedFetch('/api/settings');
+        if (response.ok) {
+          const data = await response.json();
+          setSettings(data);
+        }
+      } catch (e) {
+        console.error("Lỗi fetch settings:", e);
+      }
+    };
+    if (user && token) {
+      fetchSettings();
+    }
+  }, [user, token]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      setIsTabActive(document.visibilityState === 'visible');
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
+
+  const hasBankInfo = (u: User | null) => {
+    if (!u || u.isAdmin) return true;
+    return !!(u.bankName && u.bankAccountNumber && u.bankAccountHolder);
+  };
+
+  const deduplicateNotifications = (notifs: Notification[]) => {
+    const seen = new Set();
+    return notifs.filter(n => {
+      if (!n.id || seen.has(n.id)) return false;
+      seen.add(n.id);
+      return true;
+    });
+  };
+
+  const addNotification = async (userId: string, title: string, message: string, type: 'LOAN' | 'RANK' | 'SYSTEM') => {
+    const newNotif: Notification = {
+      id: `NOTIF-${Date.now()}-${Math.floor(Math.random() * 10000)}-${Math.random().toString(36).substring(2, 9)}`,
+      userId,
+      title,
+      message,
+      time: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) + ' ' + new Date().toLocaleDateString('vi-VN'),
+      read: false,
+      type
+    };
+    
+    setNotifications(prev => {
+      const exists = prev.some(n => n.id === newNotif.id);
+      if (exists) return prev;
+      const next = [newNotif, ...prev].slice(0, 10); // Keep more than 3 for safety, Dashboard/Modal will slice for display
+      
+      // Sync notification to server immediately
+      authenticatedFetch('/api/notifications', {
+        method: 'POST',
+        body: JSON.stringify(next.slice(0, 3))
+      }).catch(e => console.error("Lỗi lưu thông báo:", e));
+      
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (user && currentView === AppView.LOGIN) {
+      setCurrentView(user.isAdmin ? AppView.ADMIN_DASHBOARD : AppView.DASHBOARD);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchData = async (isInitial = false, fetchFull = false) => {
+      if (!isMounted) return;
+      
+      if (!user || !token) {
+        if (isInitial) setIsInitialized(true);
+        return;
+      }
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => {
+        console.warn("[FETCH] Request timed out after 30s");
+        controller.abort();
+      }, 30000);
+
+      try {
+        const params = new URLSearchParams();
+        if (user) {
+          params.append('userId', user.id);
+          if (user.isAdmin) {
+            params.append('isAdmin', 'true');
+            // For admin, fetch first 20 items by default to save egress
+            params.append('userFrom', '0');
+            params.append('userTo', '19');
+            params.append('loanFrom', '0');
+            params.append('loanTo', '19');
+          }
+        }
+        if (user?.isAdmin) params.append('checkStorage', 'true');
+        if (fetchFull) {
+          params.append('full', 'true');
+          // If full fetch, maybe we want more, but let's stick to a reasonable limit
+          if (user?.isAdmin) {
+            params.append('userTo', '49'); // Fetch 50 users
+            params.append('loanTo', '49'); // Fetch 50 loans
+          }
+        }
+        
+        params.append('notifFrom', '0');
+        params.append('notifTo', '9'); // Only 10 notifications
+        params.append('t', Date.now().toString()); // Cache buster
+        const url = `/api/data?${params.toString()}`;
+        
+        console.log(`[FETCH] Loading data from ${url} (full=${fetchFull})`);
+        const response = await authenticatedFetch(url, { signal: controller.signal });
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+          let errorMessage = `Lỗi Server ${response.status}${response.statusText ? ': ' + response.statusText : ''}`;
+          try {
+            const text = await response.text();
+            console.error(`[FETCH] Error response body:`, text);
+            try {
+              const errorData = JSON.parse(text);
+              if (errorData.message) errorMessage = errorData.message;
+              else if (errorData.error) errorMessage = errorData.error;
+              else if (errorData.details) errorMessage = `${errorMessage} (${errorData.details})`;
+            } catch (e) {
+              if (text && text.length < 250 && !text.includes('<!DOCTYPE')) {
+                errorMessage = text;
+              }
+            }
+          } catch (e) {}
+          
+          if (response.status === 500 || response.status === 503 || errorMessage.toLowerCase().includes('database') || errorMessage.toLowerCase().includes('supabase') || errorMessage.toLowerCase().includes('kết nối')) {
+            setDbError(errorMessage);
+          }
+          throw new Error(errorMessage);
+        }
+        
+        const contentType = response.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+          const text = await response.text();
+          console.error(`[FETCH] Non-JSON response:`, text.substring(0, 200));
+          throw new Error(`Server không trả về JSON (Status: ${response.status})`);
+        }
+
+        const data = await response.json();
+        if (!isMounted) return;
+        
+        console.log(`[FETCH] Data loaded successfully:`, { 
+          users: data.users?.length, 
+          loans: data.loans?.length 
+        });
+        if (data.loans) {
+          setLoans(data.loans);
+          localStorage.setItem('ndv_loans', JSON.stringify(data.loans));
+        }
+        if (data.users) {
+          setRegisteredUsers(data.users);
+          localStorage.setItem('ndv_users', JSON.stringify(data.users));
+        }
+        if (data.notifications) {
+          const deduplicated = deduplicateNotifications(data.notifications).slice(0, 10);
+          setNotifications(deduplicated);
+          localStorage.setItem('ndv_notifications', JSON.stringify(deduplicated));
+        }
+        if (data.budget !== undefined) {
+          setSystemBudget(data.budget);
+          localStorage.setItem('ndv_budget', data.budget.toString());
+        }
+        if (data.rankProfit !== undefined) {
+          setRankProfit(data.rankProfit);
+          localStorage.setItem('ndv_rank_profit', data.rankProfit.toString());
+        }
+        if (data.loanProfit !== undefined) {
+          setLoanProfit(data.loanProfit);
+          localStorage.setItem('ndv_loan_profit', data.loanProfit.toString());
+        }
+        if (data.monthlyStats !== undefined) {
+          const slicedStats = data.monthlyStats.slice(0, 6);
+          setMonthlyStats(slicedStats);
+          localStorage.setItem('ndv_monthly_stats', JSON.stringify(slicedStats));
+        }
+        if (data.lastKeepAlive !== undefined) {
+          setLastKeepAlive(data.lastKeepAlive);
+          if (data.lastKeepAlive) localStorage.setItem('ndv_last_keep_alive', data.lastKeepAlive);
+        }
+        if (data.storageFull !== undefined) setStorageFull(data.storageFull);
+        if (data.storageUsage !== undefined) setStorageUsage(data.storageUsage);
+
+        if (user && data.users) {
+          const freshUser = data.users.find((u: User) => u.id === user.id);
+          if (freshUser) {
+            setUser(freshUser);
+            localStorage.setItem('vnv_user', JSON.stringify(freshUser));
+          }
+        }
+      } catch (e: any) {
+        clearTimeout(timeout);
+        console.error("Lỗi khi tải dữ liệu ban đầu:", e.message || e);
+      } finally {
+        if (isInitial) setIsInitialized(true);
+      }
+    };
+
+    fetchData(true);
+
+    // Socket.io initialization
+    const socket = io(window.location.origin);
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      console.log('[REALTIME] Connected to server');
+      if (user) {
+        socket.emit('join', { userId: user.id, isAdmin: user.isAdmin });
+      }
+    });
+
+    socket.on('user_updated', (updatedUser: User) => {
+      if (document.visibilityState !== 'visible') return;
+      console.log('[REALTIME] User updated:', updatedUser.id);
+      setRegisteredUsers(prev => {
+        const next = prev.map(u => u.id === updatedUser.id ? updatedUser : u);
+        localStorage.setItem('ndv_users', JSON.stringify(next));
+        return next;
+      });
+      if (user && user.id === updatedUser.id) {
+        setUser(updatedUser);
+        localStorage.setItem('vnv_user', JSON.stringify(updatedUser));
+      }
+    });
+
+    socket.on('users_updated', (updatedUsers: User[]) => {
+      if (document.visibilityState !== 'visible') return;
+      console.log('[REALTIME] Multiple users updated');
+      setRegisteredUsers(prev => {
+        const newUsers = [...prev];
+        updatedUsers.forEach(u => {
+          const idx = newUsers.findIndex(existing => existing.id === u.id);
+          if (idx !== -1) newUsers[idx] = u;
+          else newUsers.push(u);
+        });
+        localStorage.setItem('ndv_users', JSON.stringify(newUsers));
+        return newUsers;
+      });
+      if (user) {
+        const me = updatedUsers.find(u => u.id === user.id);
+        if (me) {
+          setUser(me);
+          localStorage.setItem('vnv_user', JSON.stringify(me));
+        }
+      }
+    });
+
+    socket.on('loan_updated', (updatedLoan: LoanRecord) => {
+      if (document.visibilityState !== 'visible') return;
+      console.log('[REALTIME] Loan updated:', updatedLoan.id);
+      setLoans(prev => {
+        let next;
+        const idx = prev.findIndex(l => l.id === updatedLoan.id);
+        if (idx !== -1) next = prev.map(l => l.id === updatedLoan.id ? updatedLoan : l);
+        else next = [updatedLoan, ...prev];
+        localStorage.setItem('ndv_loans', JSON.stringify(next));
+        return next;
+      });
+    });
+
+    socket.on('loans_updated', (updatedLoans: LoanRecord[]) => {
+      if (document.visibilityState !== 'visible') return;
+      console.log('[REALTIME] Multiple loans updated');
+      setLoans(prev => {
+        const newLoans = [...prev];
+        updatedLoans.forEach(l => {
+          const idx = newLoans.findIndex(existing => existing.id === l.id);
+          if (idx !== -1) newLoans[idx] = l;
+          else newLoans.push(l);
+        });
+        localStorage.setItem('ndv_loans', JSON.stringify(newLoans));
+        return newLoans;
+      });
+    });
+
+    socket.on('notification_updated', (notif: Notification) => {
+      if (document.visibilityState !== 'visible') return;
+      console.log('[REALTIME] Notification received');
+      setNotifications(prev => {
+        if (prev.some(n => n.id === notif.id)) return prev;
+        const next = [notif, ...prev].slice(0, 10);
+        localStorage.setItem('ndv_notifications', JSON.stringify(next));
+        return next;
+      });
+    });
+
+    socket.on('config_updated', (configs: any[]) => {
+      if (document.visibilityState !== 'visible') return;
+      console.log('[REALTIME] Config updated');
+      configs.forEach(c => {
+        if (c.key === 'budget') {
+          setSystemBudget(c.value);
+          localStorage.setItem('ndv_budget', c.value.toString());
+        }
+        if (c.key === 'rankProfit') {
+          setRankProfit(c.value);
+          localStorage.setItem('ndv_rank_profit', c.value.toString());
+        }
+        if (c.key === 'loanProfit') {
+          setLoanProfit(c.value);
+          localStorage.setItem('ndv_loan_profit', c.value.toString());
+        }
+        if (c.key === 'monthlyStats') {
+          const sliced = c.value.slice(0, 6);
+          setMonthlyStats(sliced);
+          localStorage.setItem('ndv_monthly_stats', JSON.stringify(sliced));
+        }
+        if (c.key === 'lastKeepAlive') {
+          setLastKeepAlive(c.value);
+          if (c.value) localStorage.setItem('ndv_last_keep_alive', c.value);
+        }
+      });
+    });
+
+    socket.on('sync_completed', (data: any) => {
+      console.log('[REALTIME] Full sync completed');
+      if (data.users) setRegisteredUsers(prev => {
+        const next = [...prev];
+        data.users.forEach((u: any) => {
+          const idx = next.findIndex(e => e.id === u.id);
+          if (idx !== -1) next[idx] = u; else next.push(u);
+        });
+        return next;
+      });
+      if (data.loans) setLoans(prev => {
+        const next = [...prev];
+        data.loans.forEach((l: any) => {
+          const idx = next.findIndex(e => e.id === l.id);
+          if (idx !== -1) next[idx] = l; else next.push(l);
+        });
+        return next;
+      });
+    });
+
+    socket.on('supabase_ping', (data: { timestamp: string }) => {
+      console.log('[REALTIME] Supabase ping received:', data.timestamp);
+      setLastKeepAlive(data.timestamp);
+      localStorage.setItem('ndv_last_keep_alive', data.timestamp);
+    });
+
+    return () => {
+      isMounted = false;
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
+    };
+  }, [user, token]);
+
+  // Re-join room when user changes
+  useEffect(() => {
+    if (socketRef.current && socketRef.current.connected && user) {
+      socketRef.current.emit('join', { userId: user.id, isAdmin: user.isAdmin });
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!isInitialized || isGlobalProcessing || !isTabActive) return;
+
+    // Throttle sync to once every 10 minutes to prevent loops and redundant requests
+    const nowTime = Date.now();
+    if (nowTime - lastSyncTimestamp.current < 600000) return;
+    lastSyncTimestamp.current = nowTime;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    let usersUpdated = false;
+    let loansUpdated = false;
+
+    const newUsers = [...registeredUsers];
+    
+    // 1. Calculate fines and cleanup old bill images
+    const threeDaysInMs = 3 * 24 * 60 * 60 * 1000;
+    const cleanupThreshold = nowTime - threeDaysInMs;
+
+    const newLoans = loans.map(loan => {
+      let updated = false;
+      let currentLoan = { ...loan };
+
+      // Fine calculation
+      if (loan.status === 'ĐANG NỢ' || loan.status === 'CHỜ TẤT TOÁN' || loan.status === 'ĐANG GIẢI NGÂN') {
+        const [d, m, y] = loan.date.split('/').map(Number);
+        const dueDate = new Date(y, m - 1, d);
+        dueDate.setHours(0, 0, 0, 0);
+
+        if (today > dueDate) {
+          const diffTime = today.getTime() - dueDate.getTime();
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          
+          const maxFine = loan.amount * (Number(settings.MAX_FINE_PERCENT || 30) / 100);
+          const fineRate = Number(settings.FINE_RATE || 0.1) / 100;
+          const rawFine = loan.amount * fineRate * diffDays;
+          const newFine = Math.ceil(Math.min(maxFine, rawFine) / 1000) * 1000;
+
+          if (loan.fine !== newFine) {
+            currentLoan.fine = newFine;
+            updated = true;
+          }
+        }
+      }
+
+      // Bill image cleanup (after 3 days of settlement)
+      if (loan.status === 'ĐÃ TẤT TOÁN' && loan.billImage && (loan.updatedAt || 0) < cleanupThreshold) {
+        currentLoan.billImage = null;
+        updated = true;
+      }
+
+      if (updated) {
+        loansUpdated = true;
+        currentLoan.updatedAt = nowTime;
+        return currentLoan;
+      }
+      return loan;
+    });
+
+    // 2. Handle rank demotion for users
+    newUsers.forEach((targetUser, userIdx) => {
+      if (targetUser.isAdmin) return;
+
+      const userLoans = newLoans.filter(l => 
+        l.userId === targetUser.id && 
+        (l.status === 'ĐANG NỢ' || l.status === 'CHỜ TẤT TOÁN' || l.status === 'ĐANG GIẢI NGÂN')
+      );
+
+      let maxDiffDays = 0;
+      userLoans.forEach(loan => {
+        const [d, m, y] = loan.date.split('/').map(Number);
+        const dueDate = new Date(y, m - 1, d);
+        dueDate.setHours(0, 0, 0, 0);
+        if (today > dueDate) {
+          const diffTime = today.getTime() - dueDate.getTime();
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          if (diffDays > maxDiffDays) maxDiffDays = diffDays;
+        }
+      });
+
+      if (maxDiffDays > 0) {
+        const rankOrder: UserRank[] = ['standard', 'bronze', 'silver', 'gold', 'diamond'];
+        let currentRank = targetUser.rank;
+        let currentProgress = targetUser.rankProgress;
+        let remainingDays = maxDiffDays;
+
+        if (currentRank === 'diamond') {
+          currentRank = 'gold';
+          currentProgress = 10;
+          remainingDays -= 1;
+        }
+
+        while (remainingDays > 0 && currentRank !== 'standard') {
+          if (currentProgress >= remainingDays) {
+            currentProgress -= remainingDays;
+            remainingDays = 0;
+          } else {
+            remainingDays -= (currentProgress + 1);
+            const rankIdx = rankOrder.indexOf(currentRank);
+            if (rankIdx > 0) {
+              currentRank = rankOrder[rankIdx - 1];
+              currentProgress = 10;
+            } else {
+              remainingDays = 0;
+            }
+          }
+        }
+
+        if (currentRank === 'standard' && remainingDays > 0) {
+          currentProgress = Math.max(0, currentProgress - remainingDays);
+          remainingDays = 0;
+        }
+
+        if (currentRank !== targetUser.rank || currentProgress !== targetUser.rankProgress) {
+          let newLimit = targetUser.totalLimit;
+          if (currentRank === 'standard') newLimit = 2000000;
+          else if (currentRank === 'bronze') newLimit = 3000000;
+          else if (currentRank === 'silver') newLimit = 4000000;
+          else if (currentRank === 'gold') newLimit = 5000000;
+          else if (currentRank === 'diamond') newLimit = 10000000;
+
+          newUsers[userIdx] = {
+            ...targetUser,
+            rank: currentRank,
+            rankProgress: currentProgress,
+            totalLimit: newLimit,
+            balance: Math.min(newLimit, targetUser.balance),
+            updatedAt: nowTime
+          };
+          usersUpdated = true;
+        }
+      }
+    });
+
+    // Consolidate updates and persist to server
+    if (loansUpdated || usersUpdated) {
+      const updatedLoans = loansUpdated ? newLoans.filter((l, i) => l !== loans[i]) : [];
+      const updatedUsers = usersUpdated ? newUsers.filter((u, i) => u !== registeredUsers[i]) : [];
+
+      if (loansUpdated) setLoans(newLoans);
+      if (usersUpdated) {
+        setRegisteredUsers(newUsers);
+        if (user && !user.isAdmin) {
+          const updatedMe = newUsers.find(u => u.id === user.id);
+          if (updatedMe) setUser(updatedMe);
+        }
+      }
+
+      // Persist ONLY updated items to server to save egress
+      if (updatedLoans.length > 0 || updatedUsers.length > 0) {
+        authenticatedFetch('/api/sync', {
+          method: 'POST',
+          body: JSON.stringify({
+            loans: updatedLoans.length > 0 ? updatedLoans : undefined,
+            users: updatedUsers.length > 0 ? updatedUsers : undefined
+          })
+        }).catch(e => console.error("Lỗi đồng bộ phạt/hạ hạng:", e));
+      }
+    }
+  }, [isInitialized, loans, registeredUsers, isGlobalProcessing]);
+
+  // Only persist current user session to localStorage if rememberMe is true
+  useEffect(() => {
+    localStorage.setItem('vnv_remember', rememberMe.toString());
+    
+    if (!isInitialized) return; // Don't touch localStorage during initial load
+
+    if (rememberMe && user) {
+      localStorage.setItem('vnv_user', JSON.stringify(user));
+    } else if (!user) {
+      // Only remove if user is explicitly null (logged out)
+      localStorage.removeItem('vnv_user');
+    }
+  }, [user, rememberMe, isInitialized]);
+
+  const handleLogin = async (phone: string, password?: string) => {
+    setLoginError(null);
+    setIsGlobalProcessing(true);
+    try {
+      const response = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, password })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          const loggedInUser = { ...data.user, isLoggedIn: true };
+          setUser(loggedInUser);
+          setToken(data.token);
+          localStorage.setItem('vnv_token', data.token);
+          setCurrentView(loggedInUser.isAdmin ? AppView.ADMIN_DASHBOARD : AppView.DASHBOARD);
+          if (!loggedInUser.isAdmin && !hasBankInfo(loggedInUser)) {
+            setShowBankWarning(true);
+          }
+        } else {
+          setLoginError(data.error || "Số điện thoại hoặc mật khẩu không chính xác.");
+        }
+      } else {
+        const errorData = await response.json();
+        setLoginError(errorData.error || "Số điện thoại hoặc mật khẩu không chính xác.");
+      }
+    } catch (e) {
+      console.error("Lỗi đăng nhập:", e);
+      setLoginError("Đã xảy ra lỗi hệ thống. Vui lòng thử lại sau.");
+    } finally {
+      setIsGlobalProcessing(false);
+    }
+  };
+
+  const handleRegister = async (userData: Partial<User>) => {
+    if (isProcessingRef.current) return;
+    isProcessingRef.current = true;
+    setIsGlobalProcessing(true);
+    try {
+      setRegisterError(null);
+      const existingUser = registeredUsers.find(u => u.phone === userData.phone);
+      if (existingUser) {
+        setRegisterError("Số điện thoại này đã được đăng ký.");
+        isProcessingRef.current = false;
+        setIsGlobalProcessing(false);
+        return;
+      }
+
+      const newUserId = Math.floor(1000 + Math.random() * 9000).toString();
+      
+      // Tải ảnh lên ImgBB để tiết kiệm dung lượng Supabase (Egress Quota)
+      let idFrontUrl = userData.idFront;
+      let idBackUrl = userData.idBack;
+
+      if (userData.idFront && userData.idFront.startsWith('data:image')) {
+        idFrontUrl = await uploadToImgBB(userData.idFront, `MT_${newUserId}_${Date.now()}`);
+      }
+      if (userData.idBack && userData.idBack.startsWith('data:image')) {
+        idBackUrl = await uploadToImgBB(userData.idBack, `MS_${newUserId}_${Date.now()}`);
+      }
+
+      const newUser: User = {
+        id: newUserId, 
+        phone: userData.phone || '', fullName: userData.fullName || '',
+        idNumber: userData.idNumber || '', address: userData.address || '',
+        password: userData.password || '', // This will be hashed on the server
+        balance: 2000000, totalLimit: 2000000, rank: 'standard', rankProgress: 0,
+        isLoggedIn: true, isAdmin: false,
+        joinDate: new Date().toLocaleTimeString('vi-VN') + ' ' + new Date().toLocaleDateString('vi-VN'),
+        idFront: idFrontUrl, idBack: idBackUrl, refZalo: userData.refZalo, relationship: userData.relationship,
+        lastLoanSeq: 0,
+        updatedAt: Date.now()
+      };
+      
+      const newUsers = [...registeredUsers, newUser];
+      
+      // Optimistic UI
+      setRegisteredUsers(newUsers);
+      // Don't set user yet, wait for server response or just set it but without password
+      const { password: _, ...userForState } = newUser;
+      setUser(userForState as User);
+      setCurrentView(AppView.DASHBOARD);
+      setShowBankWarning(true);
+
+      // Background Sync - Only send the NEW user, not the whole array
+      const response = await fetch('/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newUser)
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setToken(data.token);
+          localStorage.setItem('vnv_token', data.token);
+        }
+      }
+      
+      isProcessingRef.current = false;
+      setIsGlobalProcessing(false);
+    } catch (e) {
+      console.error("Lỗi lưu đăng ký:", e);
+      setRegisterError("Đã xảy ra lỗi hệ thống. Vui lòng thử lại sau.");
+      isProcessingRef.current = false;
+      setIsGlobalProcessing(false);
+    }
+  };
+
+  const [lastSyncTime, setLastSyncTime] = useState<number>(() => {
+    const saved = localStorage.getItem('ndv_last_sync_time');
+    return saved ? parseInt(saved) : 0;
+  });
+
+  const fetchFullData = async (force = false) => {
+    if (!user || !token || isGlobalProcessing || !isTabActive) return;
+    
+    // Cache logic: Only fetch if forced or if last fetch was more than 60 seconds ago
+    const now = Date.now();
+    if (!force && now - lastFullFetch.current < 60000) {
+      console.log("[CACHE] Using cached full data (last fetch was < 60s ago)");
+      return;
+    }
+
+    setIsGlobalProcessing(true);
+    lastFullFetch.current = now;
+    
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+
+    try {
+      const params = new URLSearchParams();
+      params.append('userId', user.id);
+      if (user.isAdmin) {
+        params.append('isAdmin', 'true');
+        // Fetch a larger but still limited range for "Full Data"
+        params.append('userFrom', '0');
+        params.append('userTo', '99'); // 100 users
+        params.append('loanFrom', '0');
+        params.append('loanTo', '99'); // 100 loans
+      }
+      
+      // Delta update logic
+      if (!force && lastSyncTime > 0) {
+        params.append('since', lastSyncTime.toString());
+      } else {
+        params.append('full', 'true');
+      }
+      
+      params.append('t', now.toString());
+      
+      const response = await authenticatedFetch(`/api/data?${params.toString()}`, { signal: controller.signal });
+      clearTimeout(timeout);
+
+      const contentType = response.headers.get("content-type");
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[FETCH] HTTP Error ${response.status}:`, errorText);
+        throw new Error(`HTTP Error ${response.status}`);
+      }
+
+      let data;
+      const responseText = await response.text();
+      try {
+        data = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error("[FETCH] JSON Parse Error. Raw response:", responseText.substring(0, 500));
+        throw parseError;
+      }
+
+      if (data) {
+        lastFullFetch.current = Date.now();
+        setLastSyncTime(Date.now());
+        localStorage.setItem('ndv_last_sync_time', Date.now().toString());
+
+        if (data.loans) setLoans(prev => {
+          const next = [...prev];
+          data.loans.forEach((l: any) => {
+            const idx = next.findIndex(e => e.id === l.id);
+            if (idx !== -1) next[idx] = l; else next.push(l);
+          });
+          localStorage.setItem('ndv_loans', JSON.stringify(next));
+          return next;
+        });
+        if (data.users) setRegisteredUsers(prev => {
+          const next = [...prev];
+          data.users.forEach((u: any) => {
+            const idx = next.findIndex(e => e.id === u.id);
+            if (idx !== -1) next[idx] = u; else next.push(u);
+          });
+          localStorage.setItem('ndv_users', JSON.stringify(next));
+          return next;
+        });
+        
+        if (data.budget !== undefined) {
+          setSystemBudget(data.budget);
+          localStorage.setItem('ndv_budget', data.budget.toString());
+        }
+        if (data.rankProfit !== undefined) {
+          setRankProfit(data.rankProfit);
+          localStorage.setItem('ndv_rank_profit', data.rankProfit.toString());
+        }
+        if (data.loanProfit !== undefined) {
+          setLoanProfit(data.loanProfit);
+          localStorage.setItem('ndv_loan_profit', data.loanProfit.toString());
+        }
+        if (data.monthlyStats) {
+          const sliced = data.monthlyStats.slice(0, 6);
+          setMonthlyStats(sliced);
+          localStorage.setItem('ndv_monthly_stats', JSON.stringify(sliced));
+        }
+        if (data.lastKeepAlive !== undefined) {
+          setLastKeepAlive(data.lastKeepAlive);
+          if (data.lastKeepAlive) localStorage.setItem('ndv_last_keep_alive', data.lastKeepAlive);
+        }
+
+        if (user && data.users) {
+          const me = data.users.find((u: any) => u.id === user.id);
+          if (me) {
+            setUser(me);
+            localStorage.setItem('vnv_user', JSON.stringify(me));
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Lỗi khi tải dữ liệu đầy đủ:", e);
+    } finally {
+      setIsGlobalProcessing(false);
+    }
+  };
+
+  const handleApplyLoan = async (amount: number, signature?: string) => {
+    if (!user || isProcessingRef.current) return;
+
+    // Chặn spam: Kiểm tra xem có khoản vay nào đang chờ xử lý không
+    const userLoans = loans.filter(l => l.userId === user.id);
+    const hasPending = userLoans.some(l => ['CHỜ DUYỆT', 'ĐÃ DUYỆT', 'ĐANG GIẢI NGÂN', 'CHỜ TẤT TOÁN'].includes(l.status));
+    
+    if (hasPending) {
+      alert("Bạn đang có một khoản vay đang được xử lý. Vui lòng đợi cho đến khi khoản vay hiện tại hoàn tất trước khi đăng ký khoản mới.");
+      return;
+    }
+
+    isProcessingRef.current = true;
+    lastActionTimestamp.current = Date.now();
+    // No global processing for 0ms feel
+    try {
+      // Tải chữ ký lên ImgBB
+      let signatureUrl = signature;
+      if (signature && signature.startsWith('data:image')) {
+        signatureUrl = await uploadToImgBB(signature, `CK_${user.id}_${Date.now()}`);
+      }
+
+      const now = new Date();
+      
+      // Logic tính ngày đến hạn: Ngày 1 của tháng kế tiếp
+      // Nếu còn dưới 10 ngày thì chuyển sang tháng sau nữa
+      const nextMonth1st = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      const diffTime = nextMonth1st.getTime() - now.getTime();
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+      let finalDate;
+      if (diffDays < 10) {
+        finalDate = new Date(now.getFullYear(), now.getMonth() + 2, 1);
+      } else {
+        finalDate = nextMonth1st;
+      }
+      
+      const dayStr = finalDate.getDate().toString().padStart(2, '0');
+      const monthStr = (finalDate.getMonth() + 1).toString().padStart(2, '0');
+      const dueDate = `${dayStr}/${monthStr}/${finalDate.getFullYear()}`;
+      
+      // Logic tạo Mã hợp đồng: Sử dụng hàm sinh mã duy nhất
+      const nextSeq = (user.lastLoanSeq || 0) + 1;
+      const contractId = generateContractId(user.id);
+
+      const newLoan: LoanRecord = {
+        id: contractId,
+        userId: user.id, 
+        userName: user.fullName, 
+        amount: amount,
+        date: dueDate, 
+        createdAt: now.toLocaleTimeString('vi-VN') + ' ' + now.toLocaleDateString('vi-VN'), 
+        status: 'CHỜ DUYỆT', 
+        signature: signatureUrl,
+        fine: 0,
+        principalPaymentCount: 0,
+        extensionCount: 0,
+        updatedAt: Date.now()
+      };
+      
+      const updatedUser: User = { 
+        ...user, 
+        balance: user.balance - amount,
+        lastLoanSeq: nextSeq,
+        hasJoinedZalo: user.hasJoinedZalo || nextSeq === 1,
+        updatedAt: Date.now()
+      };
+
+      const newLoans = [newLoan, ...loans];
+      const newRegisteredUsers = registeredUsers.some(u => u.id === user.id)
+        ? registeredUsers.map(u => u.id === user.id ? updatedUser : u)
+        : [...registeredUsers, updatedUser];
+
+      // Optimistic UI Update - 0ms response
+      setLoans(newLoans);
+      setUser(updatedUser);
+      setRegisteredUsers(newRegisteredUsers);
+
+      // Background Sync - Targeted (only send changed records)
+      Promise.all([
+        authenticatedFetch('/api/loans', {
+          method: 'POST',
+          body: JSON.stringify([newLoan]) // Only 1 loan
+        }),
+        authenticatedFetch('/api/users', {
+          method: 'POST',
+          body: JSON.stringify([updatedUser]) // Only 1 user
+        })
+      ])
+      .then(async responses => {
+        for (const res of responses) {
+          if (!res.ok) {
+            const errorData = await res.json();
+            console.error("Sync error (apply):", errorData);
+            alert(`Lỗi đồng bộ: ${errorData.message || 'Không thể lưu dữ liệu khoản vay'}. Vui lòng thử lại.`);
+          }
+        }
+      })
+      .catch(err => {
+        console.error("Background sync error (loans):", err);
+        alert("Lỗi kết nối mạng. Vui lòng kiểm tra lại kết nối và thử lại.");
+      });
+
+      // Chuyển sang Zalo nếu là khoản vay đầu tiên và chưa từng chuyển
+      const hasAnyPriorLoans = loans.some(l => l.userId === user.id);
+      if (nextSeq === 1 && !user.hasJoinedZalo && !hasAnyPriorLoans) {
+        setTimeout(() => {
+          window.location.assign('https://zalo.me/g/escncv086');
+        }, 800);
+      }
+      
+      // Clear processing state early for better responsiveness
+      isProcessingRef.current = false;
+      lastActionTimestamp.current = Date.now();
+      setIsGlobalProcessing(false);
+    } catch (e) {
+      console.error("Lỗi lưu khoản vay:", e);
+      isProcessingRef.current = false;
+      lastActionTimestamp.current = Date.now();
+      setIsGlobalProcessing(false);
+    }
+  };
+
+  const handleUpgradeRank = async (targetRank: UserRank, bill: string) => {
+    if (!user || isProcessingRef.current) return;
+    isProcessingRef.current = true;
+    lastActionTimestamp.current = Date.now();
+    // No global processing for 0ms feel
+    try {
+      // Tải hóa đơn lên ImgBB
+      let billUrl = bill;
+      if (bill && bill.startsWith('data:image')) {
+        billUrl = await uploadToImgBB(bill, `HANG_${user.id}_${Date.now()}`);
+      }
+
+      const updatedUser = { ...user, pendingUpgradeRank: targetRank, rankUpgradeBill: billUrl, updatedAt: Date.now() };
+      const newRegisteredUsers = registeredUsers.some(u => u.id === user.id)
+        ? registeredUsers.map(u => u.id === user.id ? updatedUser : u)
+        : [...registeredUsers, updatedUser];
+      
+      // Optimistic UI Update - 0ms response
+      setUser(updatedUser);
+      setRegisteredUsers(newRegisteredUsers);
+
+      // Background Sync - Targeted (only send changed records)
+      authenticatedFetch('/api/users', {
+        method: 'POST',
+        body: JSON.stringify([updatedUser])
+      }).catch(err => console.error("Background sync error (upgrade):", err));
+      
+      isProcessingRef.current = false;
+      lastActionTimestamp.current = Date.now();
+      setIsGlobalProcessing(false);
+    } catch (e) {
+      console.error("Lỗi nâng hạng:", e);
+      isProcessingRef.current = false;
+      lastActionTimestamp.current = Date.now();
+      setIsGlobalProcessing(false);
+    }
+  };
+
+  const handleSettleLoan = async (loanId: string, bill: string, settlementType: 'ALL' | 'PRINCIPAL' | 'PARTIAL', bankTransactionId?: string, partialAmount?: number) => {
+    if (isProcessingRef.current) return;
+    isProcessingRef.current = true;
+    lastActionTimestamp.current = Date.now();
+    // No global processing for 0ms feel
+    try {
+      // Tải biên lai tất toán/gia hạn lên ImgBB
+      let billUrl = bill;
+      if (bill && bill.startsWith('data:image')) {
+        const prefix = settlementType === 'PRINCIPAL' ? 'GH' : (settlementType === 'PARTIAL' ? 'TTMP' : 'TT');
+        billUrl = await uploadToImgBB(bill, `${prefix}_${loanId}_${Date.now()}`);
+      }
+
+      let updatedLoan: LoanRecord | null = null;
+      const newLoans = loans.map(loan => {
+        if (loan.id === loanId) {
+          updatedLoan = { 
+            ...loan, 
+            status: 'CHỜ TẤT TOÁN', 
+            billImage: billUrl, 
+            bankTransactionId,
+            settlementType,
+            partialAmount,
+            rejectionReason: null, // Clear old rejection reason on re-submission
+            updatedAt: Date.now() 
+          };
+          return updatedLoan;
+        }
+        return loan;
+      });
+
+      // Optimistic UI
+      setLoans(newLoans);
+
+      // Background Sync - Only send the UPDATED loan
+      if (updatedLoan) {
+        authenticatedFetch('/api/loans', {
+          method: 'POST',
+          body: JSON.stringify([updatedLoan])
+        })
+        .then(async res => {
+          if (!res.ok) {
+            const errorData = await res.json();
+            console.error("Sync error (settle):", errorData);
+            alert(`Lỗi đồng bộ: ${errorData.message || 'Không thể lưu dữ liệu tất toán'}. Vui lòng thử lại.`);
+          }
+        })
+        .catch(err => {
+          console.error("Background sync error (settle):", err);
+          alert("Lỗi kết nối mạng. Vui lòng kiểm tra lại kết nối và thử lại.");
+        });
+      }
+      
+    } catch (e) {
+      console.error("Lỗi tất toán:", e);
+    } finally {
+      isProcessingRef.current = false;
+      lastActionTimestamp.current = Date.now();
+      setIsGlobalProcessing(false);
+    }
+  };
+
+  const handleAdminLoanAction = async (loanId: string, action: 'APPROVE' | 'DISBURSE' | 'SETTLE' | 'REJECT', reason?: string) => {
+    if (isProcessingRef.current) return;
+    isProcessingRef.current = true;
+    lastActionTimestamp.current = Date.now();
+    setIsGlobalProcessing(true); // Admin actions show loading for 100% certainty
+    try {
+      let newLoans = [...loans];
+      let newRegisteredUsers = [...registeredUsers];
+      let usersUpdated = false;
+      let newBudget = systemBudget;
+
+      const loanIdx = newLoans.findIndex(l => l.id === loanId);
+      if (loanIdx === -1) {
+        isProcessingRef.current = false;
+        setIsGlobalProcessing(false);
+        return;
+      }
+
+      const loan = newLoans[loanIdx];
+
+      // Ngăn chặn xử lý lặp lại hoặc trạng thái không hợp lệ
+      if (action === 'APPROVE' && loan.status !== 'CHỜ DUYỆT') {
+        isProcessingRef.current = false;
+        setIsGlobalProcessing(false);
+        return;
+      }
+      if (action === 'DISBURSE' && loan.status !== 'ĐÃ DUYỆT') {
+        isProcessingRef.current = false;
+        setIsGlobalProcessing(false);
+        return;
+      }
+      if (action === 'SETTLE' && loan.status !== 'CHỜ TẤT TOÁN') {
+        isProcessingRef.current = false;
+        setIsGlobalProcessing(false);
+        return;
+      }
+      if (action === 'REJECT' && loan.status !== 'CHỜ DUYỆT' && loan.status !== 'CHỜ TẤT TOÁN') {
+        isProcessingRef.current = false;
+        setIsGlobalProcessing(false);
+        return;
+      }
+
+      let newStatus = loan.status;
+      let rejectionReason = action === 'REJECT' ? (reason || loan.rejectionReason) : null;
+
+      if (action === 'DISBURSE') newBudget -= (loan.amount * (1 - Number(settings.PRE_DISBURSEMENT_FEE || 0) / 100)); // Only deduct disbursed amount (fee kept in budget)
+      else if (action === 'SETTLE') {
+        if (loan.settlementType === 'PRINCIPAL') {
+          // Vay Gốc: Pay fee + fines
+          newBudget += ((loan.amount * (Number(settings.PRE_DISBURSEMENT_FEE || 0) / 100)) + (loan.fine || 0));
+        } else if (loan.settlementType === 'PARTIAL') {
+          // Tất toán 1 phần: Pay partial principal + fee on remaining principal + fines
+          const pAmount = loan.partialAmount || 0;
+          const remainingPrincipal = loan.amount - pAmount;
+          newBudget += (pAmount + (remainingPrincipal * (Number(settings.PRE_DISBURSEMENT_FEE || 0) / 100)) + (loan.fine || 0));
+        } else {
+          // Tất Cả: Pay principal + fines
+          newBudget += (loan.amount + (loan.fine || 0));
+        }
+      }
+
+      if (action === 'REJECT') {
+        if (loan.status === 'CHỜ TẤT TOÁN') {
+          newStatus = 'ĐANG NỢ';
+        } else {
+          newStatus = 'BỊ TỪ CHỐI';
+          const loanUser = newRegisteredUsers.find(u => u.id === loan.userId);
+          if (loanUser) {
+            const updatedUser = { ...loanUser, balance: Math.min(loanUser.totalLimit, loanUser.balance + loan.amount), updatedAt: Date.now() };
+            newRegisteredUsers = newRegisteredUsers.map(u => u.id === loan.userId ? updatedUser : u);
+            usersUpdated = true;
+          }
+        }
+      } else {
+        switch(action) {
+          case 'APPROVE': newStatus = 'ĐÃ DUYỆT'; break;
+          case 'DISBURSE': newStatus = 'ĐANG NỢ'; break;
+          case 'SETTLE': newStatus = 'ĐÃ TẤT TOÁN'; break;
+        }
+      }
+
+      if (action === 'SETTLE') {
+        const loanUser = newRegisteredUsers.find(u => u.id === loan.userId);
+        if (loanUser) {
+          let updatedUser;
+          if (loan.settlementType === 'PRINCIPAL') {
+            // Vay Gốc: Limit doesn't change (only fee paid), rank progress increases
+            updatedUser = { ...loanUser, rankProgress: Math.min(10, loanUser.rankProgress + 1), updatedAt: Date.now() };
+          } else if (loan.settlementType === 'PARTIAL') {
+            // Tất toán 1 phần: Restore balance by partial amount
+            const pAmount = loan.partialAmount || 0;
+            updatedUser = { 
+              ...loanUser, 
+              balance: Math.min(loanUser.totalLimit, loanUser.balance + pAmount), 
+              rankProgress: Math.min(10, loanUser.rankProgress + 1), 
+              updatedAt: Date.now() 
+            };
+          } else {
+            // Tất Cả: Restore balance
+            updatedUser = { ...loanUser, balance: Math.min(loanUser.totalLimit, loanUser.balance + loan.amount), rankProgress: Math.min(10, loanUser.rankProgress + 1), updatedAt: Date.now() };
+          }
+          newRegisteredUsers = newRegisteredUsers.map(u => u.id === loan.userId ? updatedUser : u);
+          usersUpdated = true;
+        }
+      }
+
+      // Logic tính chu kỳ tiếp theo cho Vay Gốc & TTMP: Cộng thêm 1 tháng (đến ngày 1 tháng sau)
+      let newDueDate = loan.date;
+      if (action === 'SETTLE' && (loan.settlementType === 'PRINCIPAL' || loan.settlementType === 'PARTIAL')) {
+        const [d, m, y] = loan.date.split('/').map(Number);
+        const currentDueDate = new Date(y, m - 1, d);
+        // Cộng thêm 1 tháng và đặt về ngày 1 của tháng tiếp theo
+        const nextCycleDate = new Date(currentDueDate.getFullYear(), currentDueDate.getMonth() + 1, 1);
+        const dayStr = nextCycleDate.getDate().toString().padStart(2, '0');
+        const monthStr = (nextCycleDate.getMonth() + 1).toString().padStart(2, '0');
+        newDueDate = `${dayStr}/${monthStr}/${nextCycleDate.getFullYear()}`;
+      }
+
+      let updatedLoan: LoanRecord;
+      let nextLoan: LoanRecord | null = null;
+
+      if (action === 'SETTLE' && (loan.settlementType === 'PRINCIPAL' || loan.settlementType === 'PARTIAL')) {
+        // 1. Mark current loan as settled
+        updatedLoan = { 
+          ...loan, 
+          status: 'ĐÃ TẤT TOÁN', 
+          updatedAt: Date.now() 
+        };
+
+        // 2. Create new loan for the next cycle with suffixed ID
+        const nextCount = (loan.principalPaymentCount || 0) + 1;
+        const nextExtensionCount = loan.settlementType === 'PRINCIPAL' ? (loan.extensionCount || 0) + 1 : (loan.extensionCount || 0);
+        const suffix = loan.settlementType === 'PRINCIPAL' ? 'GH' : 'TTMP';
+        
+        // Extract base ID (handle case where current ID might already have a suffix)
+        // Base ID format is [4 chars]-[4 numbers]
+        const idParts = loan.id.split('-');
+        const baseId = `${idParts[0]}-${idParts[1]}`;
+        const newId = `${baseId}-${suffix}-${nextCount}`;
+
+        nextLoan = {
+          ...loan,
+          id: newId,
+          status: 'ĐANG NỢ',
+          date: newDueDate,
+          amount: loan.settlementType === 'PARTIAL' ? (loan.amount - (loan.partialAmount || 0)) : loan.amount,
+          principalPaymentCount: nextCount,
+          extensionCount: nextExtensionCount,
+          billImage: null,
+          settlementType: null,
+          partialAmount: null,
+          fine: 0,
+          updatedAt: Date.now()
+        };
+
+        newLoans[loanIdx] = updatedLoan;
+        newLoans.push(nextLoan);
+      } else {
+        updatedLoan = { 
+          ...loan, 
+          status: (newStatus as any), 
+          rejectionReason, 
+          updatedAt: Date.now() 
+        };
+        newLoans[loanIdx] = updatedLoan;
+      }
+
+      // Calculate new stats for sync
+      let newLoanProfit = loanProfit;
+      let newMonthlyStats = [...monthlyStats];
+
+      const updateProfit = (amount: number) => {
+        if (amount <= 0) return;
+        newLoanProfit += amount;
+        const now = new Date();
+        const monthKey = `${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getFullYear()}`;
+        const existingIdx = newMonthlyStats.findIndex(s => s.month === monthKey);
+        if (existingIdx !== -1) {
+          const stat = { ...newMonthlyStats[existingIdx] };
+          stat.loanProfit += amount;
+          stat.totalProfit = stat.rankProfit + stat.loanProfit;
+          newMonthlyStats[existingIdx] = stat;
+        } else {
+          newMonthlyStats = [{ month: monthKey, rankProfit: 0, loanProfit: amount, totalProfit: amount }, ...newMonthlyStats].slice(0, 6);
+        }
+      };
+
+      if (action === 'DISBURSE') {
+        updateProfit(loan.amount * (Number(settings.PRE_DISBURSEMENT_FEE || 0) / 100)); // Recognize fee at disbursement
+      } else if (action === 'SETTLE') {
+        if (loan.settlementType === 'PRINCIPAL') {
+          // Vay Gốc: Recognize fee for the next cycle + fines
+          updateProfit((loan.amount * (Number(settings.PRE_DISBURSEMENT_FEE || 0) / 100)) + (loan.fine || 0));
+        } else if (loan.settlementType === 'PARTIAL') {
+          // Tất toán 1 phần: Recognize fee on total loan amount + fines
+          updateProfit((loan.amount * (Number(settings.PRE_DISBURSEMENT_FEE || 0) / 100)) + (loan.fine || 0));
+        } else {
+          // Tất Cả: Only recognize fines (fee was already recognized at disbursement)
+          updateProfit(loan.fine || 0);
+        }
+      }
+
+      // Persist to server using sync endpoint - Targeted sync for bandwidth
+      const syncLoans = nextLoan ? [updatedLoan, nextLoan] : [updatedLoan];
+      const syncData = {
+        loans: syncLoans, // Only the changed loans
+        budget: newBudget,
+        users: usersUpdated ? [newRegisteredUsers.find(u => u.id === loan.userId)] : undefined,
+        loanProfit: (action === 'SETTLE' || action === 'DISBURSE') ? newLoanProfit : undefined,
+        monthlyStats: (action === 'SETTLE' || action === 'DISBURSE') ? newMonthlyStats : undefined
+      };
+
+      const response = await authenticatedFetch('/api/sync', {
+        method: 'POST',
+        body: JSON.stringify(syncData)
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+      }
+
+      // Update local state ONLY after successful sync for Admin
+      setLoans(newLoans);
+      setSystemBudget(newBudget);
+      setLoanProfit(newLoanProfit);
+      setMonthlyStats(newMonthlyStats);
+
+      if (usersUpdated) {
+        setRegisteredUsers(newRegisteredUsers);
+        if (user && !user.isAdmin) {
+          const updatedMe = newRegisteredUsers.find(u => u.id === user.id);
+          if (updatedMe) setUser(updatedMe);
+        }
+      }
+
+      // Notifications
+      if (action === 'DISBURSE') {
+        addNotification(loan.userId, 'Giải ngân thành công', `Khoản vay ID ${loan.id} đã được giải ngân vào tài khoản của bạn.`, 'LOAN');
+      } else if (action === 'SETTLE') {
+        if (loan.settlementType === 'PRINCIPAL') {
+          addNotification(loan.userId, 'Gia hạn thành công', `Khoản vay ID ${loan.id} đã được gia hạn thành công. Hạn trả mới: ${newDueDate}.`, 'LOAN');
+        } else if (loan.settlementType === 'PARTIAL') {
+          addNotification(loan.userId, 'Tất toán 1 phần thành công', `Khoản vay ID ${loan.id} đã được tất toán 1 phần gốc (${(loan.partialAmount || 0).toLocaleString()} đ) thành công.`, 'LOAN');
+        } else {
+          addNotification(loan.userId, 'Tất toán thành công', `Khoản vay ID ${loan.id} đã được tất toán toàn bộ khoản vay thành công.`, 'LOAN');
+        }
+      } else if (action === 'REJECT') {
+        const isSettlementReject = loan.status === 'CHỜ TẤT TOÁN';
+        let title = 'Yêu cầu bị từ chối';
+        let typeStr = '';
+        
+        if (isSettlementReject) {
+          if (loan.settlementType === 'PRINCIPAL') {
+            title = 'Từ chối gia hạn';
+            typeStr = 'gia hạn cho ';
+          } else if (loan.settlementType === 'PARTIAL') {
+            title = 'Từ chối tất toán 1 phần';
+            typeStr = 'tất toán 1 phần cho ';
+          } else {
+            title = 'Từ chối tất toán';
+            typeStr = 'tất toán toàn bộ cho ';
+          }
+        }
+        
+        addNotification(loan.userId, title, `Yêu cầu ${typeStr}khoản vay ID ${loan.id} đã bị từ chối. Lý do: ${rejectionReason || 'Không xác định'}`, 'LOAN');
+      }
+    } catch (e: any) {
+      console.error("Lỗi lưu thay đổi khoản vay Admin:", e.message || e);
+    } finally {
+      isProcessingRef.current = false;
+      lastActionTimestamp.current = Date.now();
+      setIsGlobalProcessing(false);
+    }
+  };
+
+  const handleAdminUserAction = async (userId: string, action: 'APPROVE_RANK' | 'REJECT_RANK') => {
+    if (isProcessingRef.current) return;
+    isProcessingRef.current = true;
+    lastActionTimestamp.current = Date.now();
+    setIsGlobalProcessing(true); // Admin actions show loading
+    try {
+      let newUsers = [...registeredUsers];
+      let updatedUser: User | null = null;
+
+      const targetUser = newUsers.find(u => u.id === userId);
+      if (!targetUser) {
+        isProcessingRef.current = false;
+        setIsGlobalProcessing(false);
+        return;
+      }
+
+      if (action === 'APPROVE_RANK') {
+        if (targetUser.pendingUpgradeRank) {
+          const newRank = targetUser.pendingUpgradeRank;
+          let newLimit = targetUser.totalLimit;
+          
+          if (newRank === 'bronze') newLimit = 3000000;
+          else if (newRank === 'silver') newLimit = 4000000;
+          else if (newRank === 'gold') newLimit = 5000000;
+          else if (newRank === 'diamond') newLimit = 10000000;
+          
+          updatedUser = { 
+            ...targetUser, 
+            rank: newRank, 
+            totalLimit: newLimit, 
+            balance: newLimit - (targetUser.totalLimit - targetUser.balance), 
+            pendingUpgradeRank: null, 
+            rankUpgradeBill: undefined,
+            updatedAt: Date.now()
+          };
+          
+          newUsers = newUsers.map(u => u.id === userId ? updatedUser! : u);
+          
+          const rankNames: Record<string, string> = {
+            'bronze': 'Đồng',
+            'silver': 'Bạc',
+            'gold': 'Vàng',
+            'diamond': 'Kim cương'
+          };
+          addNotification(userId, 'Nâng hạng thành công', `Hạng của bạn đã được nâng lên ${rankNames[newRank] || newRank}.`, 'RANK');
+        }
+      } else if (action === 'REJECT_RANK') {
+        updatedUser = { ...targetUser, pendingUpgradeRank: null, rankUpgradeBill: undefined, updatedAt: Date.now() };
+        newUsers = newUsers.map(u => u.id === userId ? updatedUser! : u);
+        addNotification(userId, 'Từ chối nâng hạng', `Yêu cầu nâng hạng của bạn đã bị từ chối. Vui lòng kiểm tra lại hồ sơ.`, 'RANK');
+      }
+
+      if (updatedUser) {
+        const upgradeFee = action === 'APPROVE_RANK' ? (updatedUser.totalLimit * (settings.UPGRADE_PERCENT / 100)) : 0;
+        const newBudget = systemBudget + upgradeFee;
+        
+        let newRankProfit = rankProfit;
+        let newMonthlyStats = [...monthlyStats];
+
+        if (upgradeFee > 0) {
+          newRankProfit += upgradeFee;
+          const now = new Date();
+          const monthKey = `${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getFullYear()}`;
+          const existingIdx = newMonthlyStats.findIndex(s => s.month === monthKey);
+          if (existingIdx !== -1) {
+            const stat = { ...newMonthlyStats[existingIdx] };
+            stat.rankProfit += upgradeFee;
+            stat.totalProfit = stat.rankProfit + stat.loanProfit;
+            newMonthlyStats[existingIdx] = stat;
+          } else {
+            newMonthlyStats = [{ month: monthKey, rankProfit: upgradeFee, loanProfit: 0, totalProfit: upgradeFee }, ...newMonthlyStats].slice(0, 6);
+          }
+        }
+
+        // Persist to server using sync endpoint - Targeted sync
+        const syncData = {
+          users: [updatedUser], // Only the changed user
+          budget: upgradeFee > 0 ? newBudget : undefined,
+          rankProfit: upgradeFee > 0 ? newRankProfit : undefined,
+          monthlyStats: upgradeFee > 0 ? newMonthlyStats : undefined
+        };
+
+        const response = await authenticatedFetch('/api/sync', {
+          method: 'POST',
+          body: JSON.stringify(syncData)
+        });
+
+        if (!response.ok) {
+          throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+        }
+
+        // Update local state ONLY after successful sync for Admin
+        setRegisteredUsers(newUsers);
+        if (user?.id === userId) setUser(updatedUser);
+        if (upgradeFee > 0) {
+          setSystemBudget(newBudget);
+          setRankProfit(newRankProfit);
+          setMonthlyStats(newMonthlyStats);
+        }
+      }
+    } catch (e: any) {
+      console.error("Lỗi xử lý nâng hạng Admin:", e.message || e);
+    } finally {
+      isProcessingRef.current = false;
+      lastActionTimestamp.current = Date.now();
+      setIsGlobalProcessing(false);
+    }
+  };
+
+  const handleResetRankProfit = async () => {
+    setRankProfit(0);
+    try {
+      await authenticatedFetch('/api/rankProfit', {
+        method: 'POST',
+        body: JSON.stringify({ rankProfit: 0 })
+      });
+    } catch (e) {
+      console.error("Lỗi khi reset phí nâng hạng:", e);
+    }
+  };
+
+  const handleResetLoanProfit = async () => {
+    setLoanProfit(0);
+    try {
+      await authenticatedFetch('/api/loanProfit', {
+        method: 'POST',
+        body: JSON.stringify({ loanProfit: 0 })
+      });
+    } catch (e) {
+      console.error("Lỗi khi reset lợi nhuận phí và phạt:", e);
+    }
+  };
+
+  const handleDeleteUser = async (userId: string) => {
+    try {
+      await authenticatedFetch(`/api/users/${userId}`, { method: 'DELETE' });
+      setRegisteredUsers(prev => prev.filter(u => u.id !== userId));
+      setLoans(prev => prev.filter(l => l.userId !== userId));
+    } catch (e) {
+      console.error("Lỗi khi xóa user:", e);
+    }
+  };
+
+  const handleAutoCleanupUsers = async () => {
+    const SIXTY_DAYS_MS = 60 * 24 * 60 * 60 * 1000;
+    const now = Date.now();
+
+    const usersToDelete = registeredUsers.filter(u => {
+      if (u.isAdmin) return false;
+      
+      const userLoans = loans.filter(l => l.userId === u.id);
+      
+      // Check if user has any active/pending loans
+      const hasActiveLoans = userLoans.some(l => 
+        !['ĐÃ TẤT TOÁN', 'BỊ TỪ CHỐI'].includes(l.status)
+      );
+      
+      if (hasActiveLoans) return false;
+
+      // Find the latest activity timestamp for this user
+      let lastActivity = u.updatedAt || 0;
+      userLoans.forEach(l => {
+        if (l.updatedAt && l.updatedAt > lastActivity) {
+          lastActivity = l.updatedAt;
+        }
+      });
+
+      // If no activity recorded at all (shouldn't happen with updatedAt), use joinDate as fallback
+      if (lastActivity === 0 && u.joinDate) {
+        try {
+          // joinDate format: "HH:mm:ss DD/MM/YYYY"
+          const parts = u.joinDate.split(' ');
+          if (parts.length === 2) {
+            const [d, m, y] = parts[1].split('/').map(Number);
+            const [h, min, s] = parts[0].split(':').map(Number);
+            lastActivity = new Date(y, m - 1, d, h, min, s).getTime();
+          }
+        } catch (e) {
+          lastActivity = 0;
+        }
+      }
+
+      // Only delete if inactive for more than 60 days
+      return (now - lastActivity) > SIXTY_DAYS_MS;
+    });
+    
+    for (const u of usersToDelete) {
+      try {
+        await authenticatedFetch(`/api/users/${u.id}`, { method: 'DELETE' });
+      } catch (e) {
+        console.error("Lỗi khi dọn dẹp user:", u.id, e);
+      }
+    }
+    
+    setRegisteredUsers(prev => prev.filter(u => !usersToDelete.some(td => td.id === u.id)));
+    setLoans(prev => prev.filter(l => !usersToDelete.some(td => td.id === l.userId)));
+    return usersToDelete.length;
+  };
+
+  const adminNotificationCount = useMemo(() => 
+    loans.filter(l => l.status === 'CHỜ DUYỆT' || l.status === 'CHỜ TẤT TOÁN').length +
+    registeredUsers.filter(u => u.pendingUpgradeRank).length
+  , [loans, registeredUsers]);
+
+  const handleUpdateProfile = async (userData: Partial<User>) => {
+    if (user) {
+      setIsGlobalProcessing(true);
+      try {
+        // Tải ảnh lên ImgBB nếu có thay đổi
+        let idFrontUrl = userData.idFront;
+        let idBackUrl = userData.idBack;
+
+        if (userData.idFront && userData.idFront.startsWith('data:image')) {
+          idFrontUrl = await uploadToImgBB(userData.idFront, `MT_${user.id}_${Date.now()}`, settings.IMGBB_API_KEY);
+        }
+        if (userData.idBack && userData.idBack.startsWith('data:image')) {
+          idBackUrl = await uploadToImgBB(userData.idBack, `MS_${user.id}_${Date.now()}`, settings.IMGBB_API_KEY);
+        }
+
+        const updatedUser = { 
+          ...user, 
+          ...userData, 
+          idFront: idFrontUrl || user.idFront,
+          idBack: idBackUrl || user.idBack,
+          updatedAt: Date.now() 
+        };
+        const newUsers = registeredUsers.map(u => u.id === user.id ? updatedUser : u);
+        // Optimistic UI Update - 0ms response
+        setUser(updatedUser);
+        setRegisteredUsers(newUsers);
+        
+        // If password was updated, add a specific notification
+        if (userData.password) {
+          addNotification(user.id, 'Bảo mật tài khoản', 'Mật khẩu của bạn đã được thay đổi thành công.', 'SYSTEM');
+        } else {
+          addNotification(user.id, 'Cập nhật thông tin', 'Thông tin cá nhân của bạn đã được cập nhật thành công.', 'SYSTEM');
+        }
+
+        // Persist to server - Targeted sync
+        authenticatedFetch('/api/users', {
+          method: 'POST',
+          body: JSON.stringify([updatedUser])
+        }).catch(e => console.error("Lỗi lưu hồ sơ:", e));
+      } catch (e) {
+        console.error("Lỗi cập nhật hồ sơ:", e);
+      } finally {
+        setIsGlobalProcessing(false);
+      }
+    }
+  };
+
+  const handleUpdateBank = (bankData: { bankName: string; bankAccountNumber: string; bankAccountHolder: string }) => {
+    if (user) {
+      const updatedUser = { ...user, ...bankData, updatedAt: Date.now() };
+      const newUsers = registeredUsers.map(u => u.id === user.id ? updatedUser : u);
+      // Optimistic UI Update - 0ms response
+      setUser(updatedUser);
+      setRegisteredUsers(newUsers);
+      addNotification(user.id, 'Cập nhật tài khoản', 'Thông tin tài khoản nhận tiền của bạn đã được cập nhật.', 'SYSTEM');
+      setShowBankWarning(false);
+      
+      // Persist to server - Targeted sync
+      authenticatedFetch('/api/users', {
+        method: 'POST',
+        body: JSON.stringify([updatedUser])
+      }).catch(e => console.error("Lỗi lưu tài khoản ngân hàng:", e));
+    }
+  };
+
+  const handleSystemRefresh = async (targetView: AppView = AppView.LOGIN) => {
+    setIsGlobalProcessing(true);
+    try {
+      // Clear local storage if logging out
+      if (targetView === AppView.LOGIN) {
+        localStorage.removeItem('ndv_user_id');
+        setUser(null);
+      }
+      
+      // Force immediate data fetch
+      const params = new URLSearchParams();
+      params.append('checkStorage', 'true');
+      params.append('t', Date.now().toString());
+      
+      const response = await authenticatedFetch(`/api/data?${params.toString()}`);
+      if (!response.ok) throw new Error('Failed to fetch data');
+      
+      const data = await response.json();
+      
+      if (data.users) setRegisteredUsers(data.users);
+      if (data.loans) setLoans(data.loans);
+      if (data.notifications) setNotifications(deduplicateNotifications(data.notifications));
+      if (data.budget !== undefined) setSystemBudget(data.budget);
+      if (data.rankProfit !== undefined) setRankProfit(data.rankProfit);
+      if (data.loanProfit !== undefined) setLoanProfit(data.loanProfit);
+      if (data.monthlyStats) setMonthlyStats(data.monthlyStats);
+      
+      setStorageFull(data.storageFull);
+      setStorageUsage(data.storageUsage);
+      
+      setCurrentView(targetView);
+    } catch (e) {
+      console.error("Lỗi làm mới hệ thống:", e);
+      // Fallback to reload if everything fails
+      window.location.href = window.location.origin;
+    } finally {
+      setIsGlobalProcessing(false);
+    }
+  };
+
+  const renderView = () => {
+    switch (currentView) {
+      case AppView.LOGIN: return (
+        <Login 
+          onLogin={handleLogin} 
+          onNavigateRegister={() => { setRegisterError(null); setCurrentView(AppView.REGISTER); }} 
+          error={loginError}
+          rememberMe={rememberMe}
+          onToggleRememberMe={setRememberMe}
+        />
+      );
+      case AppView.REGISTER: return <Register onBack={() => setCurrentView(AppView.LOGIN)} onRegister={handleRegister} onClearError={() => setRegisterError(null)} error={registerError} />;
+      case AppView.DASHBOARD: 
+        return (
+          <Dashboard 
+            user={user} 
+            loans={loans.filter(l => l.userId === user?.id)} 
+            notifications={notifications.filter(n => n.userId === user?.id)}
+            systemBudget={systemBudget} 
+            onApply={() => {
+              if (!hasBankInfo(user)) {
+                setShowBankWarning(true);
+                return;
+              }
+              setCurrentView(AppView.APPLY_LOAN);
+            }} 
+            onLogout={handleLogout} 
+            onViewAllLoans={() => {
+              if (!hasBankInfo(user)) {
+                setShowBankWarning(true);
+                return;
+              }
+              setCurrentView(AppView.APPLY_LOAN);
+            }}
+            onSettleLoan={(loan) => {
+              setSettleLoanFromDash(loan);
+              setCurrentView(AppView.APPLY_LOAN);
+            }}
+            onViewContract={(loan) => {
+              setViewLoanFromDash(loan);
+              setCurrentView(AppView.APPLY_LOAN);
+            }}
+            onMarkNotificationRead={(id) => {
+              const updatedNotif = notifications.find(n => n.id === id);
+              if (updatedNotif) {
+                const newNotif = { ...updatedNotif, read: true };
+                setNotifications(prev => prev.map(n => n.id === id ? newNotif : n));
+                // Targeted Sync - Only send the changed notification
+                authenticatedFetch('/api/notifications', {
+                  method: 'POST',
+                  body: JSON.stringify([newNotif])
+                }).catch(e => console.error("Lỗi lưu trạng thái thông báo:", e));
+              }
+            }}
+            onMarkAllNotificationsRead={() => {
+              if (user) {
+                const userNotifs = notifications.filter(n => n.userId === user.id);
+                const updatedNotifs = userNotifs.map(n => ({ ...n, read: true }));
+                setNotifications(prev => prev.map(n => n.userId === user.id ? { ...n, read: true } : n));
+                // Targeted Sync - Only send notifications for this user
+                authenticatedFetch('/api/notifications', {
+                  method: 'POST',
+                  body: JSON.stringify(updatedNotifs)
+                });
+              }
+            }}
+            onRefresh={() => fetchFullData(true)}
+          />
+        );
+      case AppView.APPLY_LOAN: 
+        return (
+          <LoanApplication 
+            user={user} 
+            loans={loans.filter(l => l.userId === user?.id)} 
+            systemBudget={systemBudget} 
+            isGlobalProcessing={isGlobalProcessing}
+            onApplyLoan={handleApplyLoan} 
+            onSettleLoan={handleSettleLoan} 
+            onBack={() => {
+              setSettleLoanFromDash(null);
+              setViewLoanFromDash(null);
+              setCurrentView(AppView.DASHBOARD);
+            }}
+            token={token}
+            initialLoanToSettle={settleLoanFromDash}
+            initialLoanToView={viewLoanFromDash}
+            settings={settings}
+          />
+        );
+      case AppView.RANK_LIMITS: return <RankLimits user={user} isGlobalProcessing={isGlobalProcessing} onBack={() => setCurrentView(AppView.DASHBOARD)} onUpgrade={handleUpgradeRank} settings={settings} />;
+      case AppView.PROFILE: 
+        return (
+          <Profile 
+            user={user} 
+            onBack={() => setCurrentView(AppView.DASHBOARD)} 
+            onLogout={handleLogout} 
+            onUpdateBank={handleUpdateBank}
+            onUpdateProfile={handleUpdateProfile}
+            onRefresh={() => fetchFullData(true)}
+            onShowSecurity={() => setShowSecurityModal(true)}
+            onShowTerms={() => setShowTermsModal(true)}
+            onShowBankInfo={() => setShowBankInfoModal(true)}
+            onShowEditProfile={() => setShowEditProfileModal(true)}
+          />
+        );
+      case AppView.ADMIN_DASHBOARD: return <AdminDashboard user={user} loans={loans} registeredUsersCount={registeredUsers.length} systemBudget={systemBudget} rankProfit={rankProfit} loanProfit={loanProfit} monthlyStats={monthlyStats} lastKeepAlive={lastKeepAlive} onResetRankProfit={handleResetRankProfit} onResetLoanProfit={handleResetLoanProfit} onNavigateToUsers={() => setCurrentView(AppView.ADMIN_USERS)} onLogout={handleLogout} onRefresh={() => fetchFullData(true)} authenticatedFetch={authenticatedFetch} settings={settings} />;
+      case AppView.ADMIN_USERS: return <AdminUserManagement users={registeredUsers} loans={loans} isGlobalProcessing={isGlobalProcessing} onAction={handleAdminUserAction} onLoanAction={handleAdminLoanAction} onDeleteUser={handleDeleteUser} onAutoCleanup={handleAutoCleanupUsers} onFetchFullData={fetchFullData} onRefresh={() => fetchFullData(true)} onBack={() => setCurrentView(AppView.ADMIN_DASHBOARD)} settings={settings} />;
+      case AppView.ADMIN_BUDGET: 
+        return (
+          <AdminBudget 
+            currentBudget={systemBudget} 
+            onUpdate={async (val) => {
+              setSystemBudget(val);
+              try {
+                await authenticatedFetch('/api/budget', {
+                  method: 'POST',
+                  body: JSON.stringify({ budget: val })
+                });
+              } catch (e) {
+                console.error("Lỗi cập nhật ngân sách:", e);
+              }
+            }} 
+            onBack={() => setCurrentView(AppView.ADMIN_DASHBOARD)} 
+          />
+        );
+      case AppView.ADMIN_SYSTEM:
+        return (
+          <AdminSystem 
+            onReset={async () => {
+              try {
+                await authenticatedFetch('/api/reset', { method: 'POST' });
+                handleSystemRefresh(AppView.LOGIN);
+              } catch (e) {
+                console.error("Lỗi reset hệ thống:", e);
+              }
+            }}
+            onImportSuccess={() => handleSystemRefresh(AppView.LOGIN)}
+            onBack={() => setCurrentView(AppView.ADMIN_DASHBOARD)} 
+            authenticatedFetch={authenticatedFetch}
+            settings={settings}
+            onSettingsUpdate={(newSettings: any) => setSettings(newSettings)}
+          />
+        );
+      default: 
+        return (
+          <Dashboard 
+            user={user} 
+            loans={loans.filter(l => l.userId === user?.id)} 
+            notifications={notifications.filter(n => n.userId === user?.id)}
+            systemBudget={systemBudget} 
+            onApply={() => {
+              if (!hasBankInfo(user)) {
+                setShowBankWarning(true);
+                return;
+              }
+              setCurrentView(AppView.APPLY_LOAN);
+            }} 
+            onLogout={handleLogout} 
+            onViewAllLoans={() => {
+              if (!hasBankInfo(user)) {
+                setShowBankWarning(true);
+                return;
+              }
+              setCurrentView(AppView.APPLY_LOAN);
+            }}
+            onSettleLoan={(loan) => {
+              setSettleLoanFromDash(loan);
+              setCurrentView(AppView.APPLY_LOAN);
+            }}
+            onViewContract={(loan) => {
+              setViewLoanFromDash(loan);
+              setCurrentView(AppView.APPLY_LOAN);
+            }}
+            onMarkNotificationRead={(id) => {
+              const updatedNotif = notifications.find(n => n.id === id);
+              if (updatedNotif) {
+                const newNotif = { ...updatedNotif, read: true };
+                setNotifications(prev => prev.map(n => n.id === id ? newNotif : n));
+                // Targeted Sync - Only send the changed notification
+                authenticatedFetch('/api/notifications', {
+                  method: 'POST',
+                  body: JSON.stringify([newNotif])
+                }).catch(e => console.error("Lỗi lưu trạng thái thông báo:", e));
+              }
+            }}
+            onMarkAllNotificationsRead={() => {
+              if (user) {
+                const userNotifs = notifications.filter(n => n.userId === user.id);
+                const updatedNotifs = userNotifs.map(n => ({ ...n, read: true }));
+                setNotifications(prev => prev.map(n => n.userId === user.id ? { ...n, read: true } : n));
+                // Targeted Sync - Only send notifications for this user
+                authenticatedFetch('/api/notifications', {
+                  method: 'POST',
+                  body: JSON.stringify(updatedNotifs)
+                });
+              }
+            }}
+            onRefresh={() => fetchFullData(true)}
+          />
+        );
+    }
+  };
+
+  const showNavbar = user && currentView !== AppView.LOGIN && currentView !== AppView.REGISTER;
+
+  if (!isInitialized) {
+    return (
+      <div className="h-[100dvh] bg-black flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-[#ff8c00] border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  return (
+    <ErrorBoundary>
+      <div className="h-[100dvh] bg-black text-white flex flex-col max-w-md mx-auto relative overflow-hidden">
+        {storageFull && !user?.isAdmin && (
+          <div className="fixed inset-0 z-[1000] bg-black flex flex-col items-center justify-center p-8 text-center space-y-6">
+            <div className="w-20 h-20 bg-orange-500/10 rounded-full flex items-center justify-center text-[#ff8c00] animate-pulse">
+              <AlertTriangle size={40} />
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-2xl font-black uppercase tracking-tighter">Hệ thống bảo trì</h2>
+              <p className="text-sm font-bold text-gray-500 leading-relaxed">
+                Hệ thống đang quá tải dung lượng lưu trữ và cần bảo trì định kỳ. Vui lòng quay lại sau ít phút.
+              </p>
+            </div>
+            <div className="w-12 h-1 bg-orange-500/20 rounded-full"></div>
+          </div>
+        )}
+
+        {storageFull && user?.isAdmin && (
+          <div className="fixed top-0 left-0 right-0 z-[1000] bg-red-600 text-white px-4 py-2 flex items-center justify-between shadow-lg max-w-md mx-auto">
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={16} className="animate-bounce" />
+              <span className="text-[10px] font-black uppercase tracking-widest">CẢNH BÁO: DUNG LƯỢNG SẮP HẾT ({storageUsage}MB/45MB)</span>
+            </div>
+            <button onClick={() => setStorageFull(false)} className="text-white/50 hover:text-white"><X size={14} /></button>
+          </div>
+        )}
+
+        <div className="flex-1 overflow-y-auto scroll-smooth relative">
+          {renderView()}
+        </div>
+
+        {dbError && (
+          <DatabaseErrorModal 
+            error={dbError} 
+            onRetry={() => {
+              setDbError(null);
+              window.location.reload();
+            }} 
+            onClose={() => setDbError(null)} 
+          />
+        )}
+        {showBankWarning && currentView !== AppView.PROFILE && (
+          <BankUpdateWarning onUpdate={() => {
+            setShowBankWarning(false);
+            setCurrentView(AppView.PROFILE);
+          }} />
+        )}
+        {showNavbar && (
+          <div className="bg-[#111111]/95 backdrop-blur-xl border-t border-white/10 px-4 py-4 flex justify-between items-center z-[50] safe-area-bottom flex-none">
+            {user?.isAdmin ? (
+              <>
+                <button onClick={() => setCurrentView(AppView.ADMIN_DASHBOARD)} className={`flex flex-col items-center gap-1 flex-1 ${currentView === AppView.ADMIN_DASHBOARD ? 'text-[#ff8c00]' : 'text-gray-500'}`}><LayoutGrid size={22} /><span className="text-[7px] font-black uppercase tracking-widest">Tổng quan</span></button>
+                <button 
+                  onClick={() => {
+                    fetchFullData();
+                    setCurrentView(AppView.ADMIN_USERS);
+                  }} 
+                  className={`flex flex-col items-center gap-1 flex-1 relative ${currentView === AppView.ADMIN_USERS ? 'text-[#ff8c00]' : 'text-gray-500'}`}
+                >
+                  <div className="relative"><Users size={22} />{adminNotificationCount > 0 && <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-600 rounded-full flex items-center justify-center border-2 border-[#111111] animate-bounce"><span className="text-[7px] font-black text-white">{adminNotificationCount}</span></div>}</div>
+                  <span className="text-[7px] font-black uppercase tracking-widest">Người dùng</span>
+                </button>
+                <button onClick={() => setCurrentView(AppView.ADMIN_BUDGET)} className={`flex flex-col items-center gap-1 flex-1 ${currentView === AppView.ADMIN_BUDGET ? 'text-[#ff8c00]' : 'text-gray-500'}`}><Wallet size={22} /><span className="text-[7px] font-black uppercase tracking-widest">Ngân sách</span></button>
+                <button onClick={() => setCurrentView(AppView.ADMIN_SYSTEM)} className={`flex flex-col items-center gap-1 flex-1 ${currentView === AppView.ADMIN_SYSTEM ? 'text-[#ff8c00]' : 'text-gray-500'}`}><Settings size={22} /><span className="text-[7px] font-black uppercase tracking-widest">Hệ thống</span></button>
+                <button 
+                  onClick={() => fetchFullData(true)} 
+                  disabled={isGlobalProcessing}
+                  className="flex flex-col items-center gap-1 flex-1 text-gray-500 hover:text-white transition-all"
+                >
+                  <RefreshCcw size={22} className={isGlobalProcessing ? 'animate-spin' : ''} />
+                  <span className="text-[7px] font-black uppercase tracking-widest">Cập nhật</span>
+                </button>
+              </>
+            ) : (
+              <>
+                <button 
+                  onClick={() => {
+                    setSettleLoanFromDash(null);
+                    setViewLoanFromDash(null);
+                    setCurrentView(AppView.DASHBOARD);
+                  }} 
+                  className={`flex flex-col items-center gap-1 flex-1 ${currentView === AppView.DASHBOARD ? 'text-[#ff8c00]' : 'text-gray-500'}`}
+                >
+                  <Home size={22} />
+                  <span className="text-[7px] font-black uppercase tracking-widest">Trang chủ</span>
+                </button>
+                <button 
+                  onClick={() => {
+                    if (!hasBankInfo(user)) {
+                      setShowBankWarning(true);
+                      return;
+                    }
+                    setSettleLoanFromDash(null);
+                    setViewLoanFromDash(null);
+                    setCurrentView(AppView.APPLY_LOAN);
+                  }} 
+                  className={`flex flex-col items-center gap-1 flex-1 ${currentView === AppView.APPLY_LOAN ? 'text-[#ff8c00]' : 'text-gray-500'}`}
+                >
+                  <Briefcase size={22} />
+                  <span className="text-[7px] font-black uppercase tracking-widest">Vay</span>
+                </button>
+                <button 
+                  onClick={() => {
+                    if (!hasBankInfo(user)) {
+                      setShowBankWarning(true);
+                      return;
+                    }
+                    setSettleLoanFromDash(null);
+                    setViewLoanFromDash(null);
+                    setCurrentView(AppView.RANK_LIMITS);
+                  }} 
+                  className={`flex flex-col items-center gap-1 flex-1 ${currentView === AppView.RANK_LIMITS ? 'text-[#ff8c00]' : 'text-gray-500'}`}
+                >
+                  <Medal size={22} />
+                  <span className="text-[7px] font-black uppercase tracking-widest">Hạn mức</span>
+                </button>
+                <button 
+                  onClick={() => {
+                    setSettleLoanFromDash(null);
+                    setViewLoanFromDash(null);
+                    fetchFullData();
+                    setCurrentView(AppView.PROFILE);
+                  }} 
+                  className={`flex flex-col items-center gap-1 flex-1 ${currentView === AppView.PROFILE ? 'text-[#ff8c00]' : 'text-gray-500'}`}
+                >
+                  <UserIcon size={22} />
+                  <span className="text-[7px] font-black uppercase tracking-widest">Cá nhân</span>
+                </button>
+                <button 
+                  onClick={() => fetchFullData(true)} 
+                  disabled={isGlobalProcessing}
+                  className="flex flex-col items-center gap-1 flex-1 text-gray-500 hover:text-white transition-all"
+                >
+                  <RefreshCcw size={22} className={isGlobalProcessing ? 'animate-spin' : ''} />
+                  <span className="text-[7px] font-black uppercase tracking-widest">Cập nhật</span>
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Global Modals */}
+        {showSecurityModal && (
+          <SecurityModal 
+            user={user}
+            onClose={() => setShowSecurityModal(false)} 
+            onLogout={handleLogout} 
+            onUpdatePassword={(newPass) => handleUpdateProfile({ password: newPass })}
+          />
+        )}
+        {showTermsModal && <TermsModal onClose={() => setShowTermsModal(false)} />}
+        {showBankInfoModal && (
+          <BankInfoModal 
+            user={user} 
+            onClose={() => setShowBankInfoModal(false)} 
+            onUpdate={handleUpdateBank} 
+          />
+        )}
+        {showEditProfileModal && (
+          <EditProfileModal 
+            user={user} 
+            onClose={() => setShowEditProfileModal(false)} 
+            onUpdate={handleUpdateProfile} 
+          />
+        )}
+      </div>
+    </ErrorBoundary>
+  );
+};
+
+export default App;

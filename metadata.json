@@ -1,0 +1,7 @@
+{
+  "name": "Remix: NDV Money 26V",
+  "description": "NDV123",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
