@@ -596,7 +596,7 @@ router.post("/register", async (req, res) => {
       updatedAt: Date.now()
     };
 
-    const sanitizedUser = sanitizeData([newUser], USER_COLUMNS)[0];
+    const sanitizedUser = sanitizeData([newUser], USER_WRITE_COLUMNS)[0];
     
     const { error: insertError } = await client.from('users').insert(sanitizedUser);
     if (insertError) throw insertError;
@@ -725,12 +725,15 @@ router.get("/data", async (req, res) => {
     };
 
     // Parallelize queries
+    const start = Date.now();
     const [users, loans, notifications, config] = await Promise.all([
       fetchUsers(),
       fetchLoans(),
       fetchNotifications(),
       fetchConfig()
     ]);
+    const end = Date.now();
+    console.log(`[API] Data fetch took ${end - start}ms. Users: ${users.length}, Loans: ${loans.length}`);
 
     const budget = Number(config?.find(c => c.key === 'budget')?.value) || 30000000;
     const rankProfit = Number(config?.find(c => c.key === 'rankProfit')?.value) || 0;
@@ -748,8 +751,6 @@ router.get("/data", async (req, res) => {
       monthlyStats,
       lastKeepAlive
     };
-
-    console.log(`[API] Data fetch successful. Users: ${users.length}, Loans: ${loans.length}`);
 
     // Only calculate storage usage if explicitly requested
     let usage = 0;
@@ -1026,9 +1027,11 @@ const USER_COLUMNS = [
   'id', 'phone', 'fullName', 'idNumber', 'balance', 'totalLimit', 'rank', 
   'rankProgress', 'isLoggedIn', 'isAdmin', 'pendingUpgradeRank', 
   'rankUpgradeBill', 'address', 'joinDate', 'idFront', 'idBack', 
-  'refZalo', 'relationship', 'password', 'lastLoanSeq', 'bankName', 
+  'refZalo', 'relationship', 'lastLoanSeq', 'bankName', 
   'bankAccountNumber', 'bankAccountHolder', 'hasJoinedZalo', 'updatedAt'
 ];
+
+const USER_WRITE_COLUMNS = [...USER_COLUMNS, 'password'];
 
 const USER_SUMMARY_COLUMNS = [
   'id', 'phone', 'fullName', 'idNumber', 'balance', 'totalLimit', 'rank', 
@@ -1076,7 +1079,7 @@ router.post("/sync", async (req, res) => {
         return u;
       }));
       
-      const sanitizedUsers = sanitizeData(processedUsers, USER_COLUMNS);
+      const sanitizedUsers = sanitizeData(processedUsers, USER_WRITE_COLUMNS);
       if (sanitizedUsers.length > 0) {
         const { error } = await client.from('users').upsert(sanitizedUsers, { onConflict: 'id' });
         if (error) {

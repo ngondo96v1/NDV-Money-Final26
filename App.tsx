@@ -85,7 +85,7 @@ const App: React.FC = () => {
     setCurrentView(AppView.LOGIN);
   };
 
-  const authenticatedFetch = async (url: string, options: RequestInit = {}) => {
+  const authenticatedFetch = async (url: string, options: RequestInit = {}, retries = 2) => {
     if (!token && !url.includes('/api/login') && !url.includes('/api/register')) {
       return new Response(JSON.stringify({ error: "Yêu cầu xác thực" }), { status: 401 });
     }
@@ -99,16 +99,35 @@ const App: React.FC = () => {
     // Remove Content-Type if it's undefined
     if (!headers['Content-Type']) delete (headers as any)['Content-Type'];
 
-    const response = await fetch(url, { ...options, headers });
-    
-    if (response.status === 401 || response.status === 403) {
-      // Don't logout if we're already on the login page or if it's a login attempt
-      if (currentView !== AppView.LOGIN && !url.includes('/api/login')) {
-        handleLogout();
+    let lastError;
+    for (let i = 0; i <= retries; i++) {
+      try {
+        const response = await fetch(url, { ...options, headers });
+        
+        if (response.status === 401 || response.status === 403) {
+          if (currentView !== AppView.LOGIN && !url.includes('/api/login')) {
+            handleLogout();
+          }
+        }
+        
+        // Retry on 5xx server errors
+        if (response.status >= 500 && i < retries) {
+          console.warn(`[FETCH] Server Error ${response.status}. Retry ${i + 1}/${retries} for ${url}`);
+          await new Promise(res => setTimeout(res, 1000 * (i + 1)));
+          continue;
+        }
+        
+        return response;
+      } catch (e: any) {
+        lastError = e;
+        if (e.name === 'AbortError') throw e; // Don't retry if explicitly aborted
+        if (i < retries) {
+          console.warn(`[FETCH] Retry ${i + 1}/${retries} for ${url}`);
+          await new Promise(res => setTimeout(res, 1000 * (i + 1))); // Exponential backoff
+        }
       }
     }
-    
-    return response;
+    throw lastError;
   };
   const [loans, setLoans] = useState<LoanRecord[]>(() => {
     const saved = localStorage.getItem('ndv_loans');
@@ -185,10 +204,10 @@ const App: React.FC = () => {
         console.error("Lỗi fetch settings:", e);
       }
     };
-    if (user && token) {
+    if (user?.id && token) {
       fetchSettings();
     }
-  }, [user, token]);
+  }, [user?.id, token]);
 
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -248,18 +267,19 @@ const App: React.FC = () => {
     let isMounted = true;
 
     const fetchData = async (isInitial = false, fetchFull = false) => {
-      if (!isMounted) return;
+      if (!isMounted || isGlobalProcessing) return;
       
       if (!user || !token) {
         if (isInitial) setIsInitialized(true);
         return;
       }
 
+      setIsGlobalProcessing(true);
       const controller = new AbortController();
       const timeout = setTimeout(() => {
-        console.warn("[FETCH] Request timed out after 30s");
+        console.warn("[FETCH] Request timed out after 60s");
         controller.abort();
-      }, 30000);
+      }, 60000);
 
       try {
         const params = new URLSearchParams();
@@ -376,9 +396,14 @@ const App: React.FC = () => {
         }
       } catch (e: any) {
         clearTimeout(timeout);
-        console.error("Lỗi khi tải dữ liệu ban đầu:", e.message || e);
+        if (e.name === 'AbortError') {
+          console.warn("[FETCH] Request was aborted (timeout or cleanup)");
+        } else {
+          console.error("Lỗi khi tải dữ liệu ban đầu:", e.message || e);
+        }
       } finally {
         if (isInitial) setIsInitialized(true);
+        setIsGlobalProcessing(false);
       }
     };
 
@@ -390,7 +415,7 @@ const App: React.FC = () => {
 
     socket.on('connect', () => {
       console.log('[REALTIME] Connected to server');
-      if (user) {
+      if (user?.id) {
         socket.emit('join', { userId: user.id, isAdmin: user.isAdmin });
       }
     });
@@ -530,7 +555,7 @@ const App: React.FC = () => {
         socketRef.current.disconnect();
       }
     };
-  }, [user, token]);
+  }, [user?.id, user?.isAdmin, token]);
 
   // Re-join room when user changes
   useEffect(() => {
@@ -845,7 +870,10 @@ const App: React.FC = () => {
     lastFullFetch.current = now;
     
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
+    const timeout = setTimeout(() => {
+      console.warn("[FETCH FULL] Request timed out after 45s");
+      controller.abort();
+    }, 45000);
 
     try {
       const params = new URLSearchParams();
@@ -1717,6 +1745,9 @@ const App: React.FC = () => {
 
   const handleSystemRefresh = async (targetView: AppView = AppView.LOGIN) => {
     setIsGlobalProcessing(true);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+    
     try {
       // Clear local storage if logging out
       if (targetView === AppView.LOGIN) {
@@ -1729,7 +1760,8 @@ const App: React.FC = () => {
       params.append('checkStorage', 'true');
       params.append('t', Date.now().toString());
       
-      const response = await authenticatedFetch(`/api/data?${params.toString()}`);
+      const response = await authenticatedFetch(`/api/data?${params.toString()}`, { signal: controller.signal });
+      clearTimeout(timeout);
       if (!response.ok) throw new Error('Failed to fetch data');
       
       const data = await response.json();
