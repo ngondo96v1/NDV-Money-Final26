@@ -33,7 +33,7 @@ const AdminSystem: React.FC<AdminSystemProps> = ({ onReset, onImportSuccess, onB
     return val.replace(/\./g, '');
   };
 
-  const [localSettings, setLocalSettings] = useState<any>(settings || {
+  const defaultSettings = {
     SUPABASE_URL: '',
     SUPABASE_SERVICE_ROLE_KEY: '',
     IMGBB_API_KEY: '',
@@ -46,11 +46,30 @@ const AdminSystem: React.FC<AdminSystemProps> = ({ onReset, onImportSuccess, onB
     MAX_LOAN_PER_CYCLE: '10000000',
     MIN_SYSTEM_BUDGET: '1000000',
     MAX_SINGLE_LOAN_AMOUNT: '10000000'
+  };
+
+  const [localSettings, setLocalSettings] = useState<any>(() => {
+    if (!settings) return defaultSettings;
+    return {
+      ...defaultSettings,
+      ...settings,
+      PAYMENT_ACCOUNT: {
+        ...defaultSettings.PAYMENT_ACCOUNT,
+        ...(settings.PAYMENT_ACCOUNT || {})
+      }
+    };
   });
 
   useEffect(() => {
     if (settings) {
-      setLocalSettings(settings);
+      setLocalSettings({
+        ...defaultSettings,
+        ...settings,
+        PAYMENT_ACCOUNT: {
+          ...defaultSettings.PAYMENT_ACCOUNT,
+          ...(settings.PAYMENT_ACCOUNT || {})
+        }
+      });
     }
   }, [settings]);
 
@@ -412,10 +431,10 @@ const AdminSystem: React.FC<AdminSystemProps> = ({ onReset, onImportSuccess, onB
               <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
                 <div className="grid grid-cols-2 gap-2">
                   <BankSearchableSelect 
-                    value={localSettings.PAYMENT_ACCOUNT.bankName}
+                    value={localSettings.PAYMENT_ACCOUNT?.bankName || ''}
                     onChange={(bankName, bin) => setLocalSettings({
                       ...localSettings, 
-                      PAYMENT_ACCOUNT: { ...localSettings.PAYMENT_ACCOUNT, bankName, bankBin: bin }
+                      PAYMENT_ACCOUNT: { ...(localSettings.PAYMENT_ACCOUNT || {}), bankName, bankBin: bin }
                     })}
                     className="w-full"
                   />
@@ -425,7 +444,7 @@ const AdminSystem: React.FC<AdminSystemProps> = ({ onReset, onImportSuccess, onB
                     value={localSettings.PAYMENT_ACCOUNT?.accountNumber || ''}
                     onChange={(e) => setLocalSettings({
                       ...localSettings, 
-                      PAYMENT_ACCOUNT: { ...localSettings.PAYMENT_ACCOUNT, accountNumber: e.target.value.replace(/\D/g, '') }
+                      PAYMENT_ACCOUNT: { ...(localSettings.PAYMENT_ACCOUNT || {}), accountNumber: e.target.value.replace(/\D/g, '') }
                     })}
                     className="bg-black border border-white/10 rounded-xl px-3 py-2 text-[9px] font-bold text-white outline-none"
                   />
@@ -436,50 +455,57 @@ const AdminSystem: React.FC<AdminSystemProps> = ({ onReset, onImportSuccess, onB
                     value={localSettings.PAYMENT_ACCOUNT?.accountName || ''}
                     onChange={(e) => setLocalSettings({
                       ...localSettings, 
-                      PAYMENT_ACCOUNT: { ...localSettings.PAYMENT_ACCOUNT, accountName: e.target.value.toUpperCase() }
+                      PAYMENT_ACCOUNT: { ...(localSettings.PAYMENT_ACCOUNT || {}), accountName: e.target.value.toUpperCase() }
                     })}
                     className="flex-1 bg-black border border-white/10 rounded-xl px-3 py-2 text-[9px] font-black text-[#ff8c00] uppercase outline-none"
                   />
                 </div>
               </div>
             </div>
-
-            {/* Fees & Limits */}
-            <div className="space-y-4 pt-4 border-t border-white/5">
-              <h5 className="text-[8px] font-black text-[#ff8c00] uppercase tracking-widest">Phí & Hạn mức</h5>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-2">
-                  <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest">Phí giải ngân (%)</label>
+            <div className="space-y-6 pt-6 border-t border-white/5">
+              <div className="flex items-center justify-between">
+                <h5 className="text-[8px] font-black text-[#ff8c00] uppercase tracking-widest flex items-center gap-2">
+                  <div className="w-1 h-3 bg-[#ff8c00] rounded-full" />
+                  Phí & Hạn mức
+                </h5>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-x-3 gap-y-4">
+                {/* Row 1 */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest px-1">Phí giải ngân (%)</label>
                   <input 
                     type="text" 
                     inputMode="numeric"
                     value={formatNumberWithDots(localSettings.PRE_DISBURSEMENT_FEE)}
                     onChange={(e) => setLocalSettings({...localSettings, PRE_DISBURSEMENT_FEE: parseNumberFromDots(e.target.value)})}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-[10px] font-bold text-white outline-none"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-bold text-white outline-none focus:border-[#ff8c00]/50 focus:bg-white/10 transition-all"
                   />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest">Gia hạn tối đa</label>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest px-1">Gia hạn tối đa</label>
                   <input 
                     type="text" 
                     inputMode="numeric"
                     value={formatNumberWithDots(localSettings.MAX_EXTENSIONS)}
                     onChange={(e) => setLocalSettings({...localSettings, MAX_EXTENSIONS: parseNumberFromDots(e.target.value)})}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-[10px] font-bold text-white outline-none"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-bold text-white outline-none focus:border-[#ff8c00]/50 focus:bg-white/10 transition-all"
                   />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest">Phí nâng hạng (%)</label>
+
+                {/* Row 2 */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest px-1">Phí nâng hạng (%)</label>
                   <input 
                     type="text" 
                     inputMode="numeric"
                     value={formatNumberWithDots(localSettings.UPGRADE_PERCENT)}
                     onChange={(e) => setLocalSettings({...localSettings, UPGRADE_PERCENT: parseNumberFromDots(e.target.value)})}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-[10px] font-bold text-white outline-none"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-bold text-white outline-none focus:border-[#ff8c00]/50 focus:bg-white/10 transition-all"
                   />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest">Phí quá hạn (%/ngày)</label>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest px-1">Phí quá hạn (%/ngày)</label>
                   <input 
                     type="text" 
                     inputMode="decimal"
@@ -491,47 +517,51 @@ const AdminSystem: React.FC<AdminSystemProps> = ({ onReset, onImportSuccess, onB
                       }
                     }}
                     placeholder="0.00"
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-[10px] font-bold text-white outline-none focus:border-[#ff8c00]/50 transition-all"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-bold text-white outline-none focus:border-[#ff8c00]/50 focus:bg-white/10 transition-all"
                   />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest">Phạt tối đa (%)</label>
+
+                {/* Row 3 */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest px-1">Phạt tối đa (%)</label>
                   <input 
                     type="text" 
                     inputMode="numeric"
                     value={formatNumberWithDots(localSettings.MAX_FINE_PERCENT)}
                     onChange={(e) => setLocalSettings({...localSettings, MAX_FINE_PERCENT: parseNumberFromDots(e.target.value)})}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-[10px] font-bold text-white outline-none"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-bold text-white outline-none focus:border-[#ff8c00]/50 focus:bg-white/10 transition-all"
                   />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest">Hạn mức chu kỳ</label>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest px-1">Hạn mức chu kỳ</label>
                   <input 
                     type="text" 
                     inputMode="numeric"
                     value={formatNumberWithDots(localSettings.MAX_LOAN_PER_CYCLE)}
                     onChange={(e) => setLocalSettings({...localSettings, MAX_LOAN_PER_CYCLE: parseNumberFromDots(e.target.value)})}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-[10px] font-bold text-white outline-none"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-bold text-white outline-none focus:border-[#ff8c00]/50 focus:bg-white/10 transition-all"
                   />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest">Ngân sách tối thiểu</label>
+
+                {/* Row 4 */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest px-1">Ngân sách tối thiểu</label>
                   <input 
                     type="text" 
                     inputMode="numeric"
                     value={formatNumberWithDots(localSettings.MIN_SYSTEM_BUDGET)}
                     onChange={(e) => setLocalSettings({...localSettings, MIN_SYSTEM_BUDGET: parseNumberFromDots(e.target.value)})}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-[10px] font-bold text-white outline-none"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-bold text-white outline-none focus:border-[#ff8c00]/50 focus:bg-white/10 transition-all"
                   />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest">Hạn mức vay tối đa</label>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest px-1">Hạn mức vay tối đa</label>
                   <input 
                     type="text" 
                     inputMode="numeric"
                     value={formatNumberWithDots(localSettings.MAX_SINGLE_LOAN_AMOUNT)}
                     onChange={(e) => setLocalSettings({...localSettings, MAX_SINGLE_LOAN_AMOUNT: parseNumberFromDots(e.target.value)})}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-[10px] font-bold text-white outline-none"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-bold text-white outline-none focus:border-[#ff8c00]/50 focus:bg-white/10 transition-all"
                   />
                 </div>
               </div>
