@@ -71,6 +71,54 @@ const isValidUrl = (url: string) => {
 const isPlaceholder = (val: string) => 
   !val || val.includes("your-project-id") || val.includes("your-service-role-key") || val === "https://your-project-id.supabase.co";
 
+// Helper to load system settings from Supabase
+const loadSystemSettings = async (client: any) => {
+  try {
+    if (!client) return {};
+    const { data, error } = await client.from('config').select('key, value');
+    if (error) throw error;
+    
+    const settings: any = {};
+    data.forEach((item: any) => {
+      // Only include system settings keys
+      const systemKeys = [
+        'PAYMENT_ACCOUNT', 'PRE_DISBURSEMENT_FEE', 'MAX_EXTENSIONS', 
+        'UPGRADE_PERCENT', 'FINE_RATE', 'MAX_FINE_PERCENT', 
+        'MAX_LOAN_PER_CYCLE', 'MIN_SYSTEM_BUDGET', 'MAX_SINGLE_LOAN_AMOUNT',
+        'IMGBB_API_KEY'
+      ];
+      if (systemKeys.includes(item.key)) {
+        settings[item.key] = item.value;
+      }
+    });
+    return settings;
+  } catch (e) {
+    console.error("[CONFIG] Failed to load settings from Supabase:", e);
+    return {};
+  }
+};
+
+// Helper to save system settings to Supabase
+const saveSystemSettings = async (client: any, newSettings: any) => {
+  try {
+    if (!client) return false;
+    
+    const upserts = Object.entries(newSettings).map(([key, value]) => ({
+      key,
+      value
+    }));
+    
+    if (upserts.length === 0) return true;
+    
+    const { error } = await client.from('config').upsert(upserts, { onConflict: 'key' });
+    if (error) throw error;
+    return true;
+  } catch (e) {
+    console.error("[CONFIG] Failed to save settings to Supabase:", e);
+    return false;
+  }
+};
+
 const app = express();
 const router = express.Router();
 let supabase: any = null;
@@ -344,58 +392,79 @@ router.get("/keep-alive", async (req, res) => {
 });
 
 // API Routes
-router.get("/settings", (req, res) => {
+router.get("/settings", async (req, res) => {
+  const client = initSupabase();
   const config = loadConfig();
-  res.json({
+  const dbSettings = await loadSystemSettings(client);
+  
+  // Merge: Supabase settings override file settings
+  const merged = {
     SUPABASE_URL: config.SUPABASE_URL || "",
     SUPABASE_SERVICE_ROLE_KEY: config.SUPABASE_SERVICE_ROLE_KEY || "",
-    IMGBB_API_KEY: config.IMGBB_API_KEY || "",
-    PAYMENT_ACCOUNT: config.PAYMENT_ACCOUNT || { bankName: "", bankBin: "", accountNumber: "", accountName: "" },
-    PRE_DISBURSEMENT_FEE: config.PRE_DISBURSEMENT_FEE !== undefined ? config.PRE_DISBURSEMENT_FEE : "",
-    MAX_EXTENSIONS: config.MAX_EXTENSIONS !== undefined ? config.MAX_EXTENSIONS : "",
-    UPGRADE_PERCENT: config.UPGRADE_PERCENT !== undefined ? config.UPGRADE_PERCENT : "",
-    FINE_RATE: config.FINE_RATE !== undefined ? config.FINE_RATE : "",
-    MAX_FINE_PERCENT: config.MAX_FINE_PERCENT !== undefined ? config.MAX_FINE_PERCENT : "30",
-    MAX_LOAN_PER_CYCLE: config.MAX_LOAN_PER_CYCLE !== undefined ? config.MAX_LOAN_PER_CYCLE : "10000000",
-    MIN_SYSTEM_BUDGET: config.MIN_SYSTEM_BUDGET !== undefined ? config.MIN_SYSTEM_BUDGET : "1000000",
-    MAX_SINGLE_LOAN_AMOUNT: config.MAX_SINGLE_LOAN_AMOUNT !== undefined ? config.MAX_SINGLE_LOAN_AMOUNT : "10000000"
-  });
+    IMGBB_API_KEY: dbSettings.IMGBB_API_KEY || config.IMGBB_API_KEY || "",
+    PAYMENT_ACCOUNT: dbSettings.PAYMENT_ACCOUNT || config.PAYMENT_ACCOUNT || { bankName: "", bankBin: "", accountNumber: "", accountName: "" },
+    PRE_DISBURSEMENT_FEE: dbSettings.PRE_DISBURSEMENT_FEE !== undefined ? dbSettings.PRE_DISBURSEMENT_FEE : (config.PRE_DISBURSEMENT_FEE !== undefined ? config.PRE_DISBURSEMENT_FEE : ""),
+    MAX_EXTENSIONS: dbSettings.MAX_EXTENSIONS !== undefined ? dbSettings.MAX_EXTENSIONS : (config.MAX_EXTENSIONS !== undefined ? config.MAX_EXTENSIONS : ""),
+    UPGRADE_PERCENT: dbSettings.UPGRADE_PERCENT !== undefined ? dbSettings.UPGRADE_PERCENT : (config.UPGRADE_PERCENT !== undefined ? config.UPGRADE_PERCENT : ""),
+    FINE_RATE: dbSettings.FINE_RATE !== undefined ? dbSettings.FINE_RATE : (config.FINE_RATE !== undefined ? config.FINE_RATE : ""),
+    MAX_FINE_PERCENT: dbSettings.MAX_FINE_PERCENT !== undefined ? dbSettings.MAX_FINE_PERCENT : (config.MAX_FINE_PERCENT !== undefined ? config.MAX_FINE_PERCENT : "30"),
+    MAX_LOAN_PER_CYCLE: dbSettings.MAX_LOAN_PER_CYCLE !== undefined ? dbSettings.MAX_LOAN_PER_CYCLE : (config.MAX_LOAN_PER_CYCLE !== undefined ? config.MAX_LOAN_PER_CYCLE : "10000000"),
+    MIN_SYSTEM_BUDGET: dbSettings.MIN_SYSTEM_BUDGET !== undefined ? dbSettings.MIN_SYSTEM_BUDGET : (config.MIN_SYSTEM_BUDGET !== undefined ? config.MIN_SYSTEM_BUDGET : "1000000"),
+    MAX_SINGLE_LOAN_AMOUNT: dbSettings.MAX_SINGLE_LOAN_AMOUNT !== undefined ? dbSettings.MAX_SINGLE_LOAN_AMOUNT : (config.MAX_SINGLE_LOAN_AMOUNT !== undefined ? config.MAX_SINGLE_LOAN_AMOUNT : "10000000")
+  };
+  
+  res.json(merged);
 });
 
-router.post("/settings", (req: any, res) => {
+router.post("/settings", async (req: any, res) => {
   if (!req.user || !req.user.isAdmin) {
     return res.status(403).json({ error: "Chỉ Admin mới có quyền thay đổi cài đặt" });
   }
 
   const newConfig = req.body;
-  if (saveConfig(newConfig)) {
-    // Re-initialize Supabase client if URL or Key changed
-    if (newConfig.SUPABASE_URL || newConfig.SUPABASE_SERVICE_ROLE_KEY) {
-      initSupabase(true);
+  const client = initSupabase();
+  
+  // 1. Save credentials to file (still needed for initial boot)
+  const fileConfig: any = {};
+  if (newConfig.SUPABASE_URL) fileConfig.SUPABASE_URL = newConfig.SUPABASE_URL;
+  if (newConfig.SUPABASE_SERVICE_ROLE_KEY) fileConfig.SUPABASE_SERVICE_ROLE_KEY = newConfig.SUPABASE_SERVICE_ROLE_KEY;
+  
+  if (Object.keys(fileConfig).length > 0) {
+    saveConfig(fileConfig);
+    initSupabase(true); // Re-init if credentials changed
+  }
+  
+  // 2. Save system settings to Supabase for persistence
+  const systemSettings: any = {};
+  const systemKeys = [
+    'PAYMENT_ACCOUNT', 'PRE_DISBURSEMENT_FEE', 'MAX_EXTENSIONS', 
+    'UPGRADE_PERCENT', 'FINE_RATE', 'MAX_FINE_PERCENT', 
+    'MAX_LOAN_PER_CYCLE', 'MIN_SYSTEM_BUDGET', 'MAX_SINGLE_LOAN_AMOUNT',
+    'IMGBB_API_KEY'
+  ];
+  
+  systemKeys.forEach(key => {
+    if (newConfig[key] !== undefined) {
+      systemSettings[key] = newConfig[key];
     }
-    
-    // Return the full updated config so frontend is in sync
-    const updatedConfig = loadConfig();
+  });
+  
+  const savedToDb = await saveSystemSettings(client, systemSettings);
+  
+  if (savedToDb) {
     res.json({ 
       success: true, 
-      message: "Cài đặt đã được lưu và áp dụng thành công.",
-      settings: {
-        SUPABASE_URL: updatedConfig.SUPABASE_URL || "",
-        SUPABASE_SERVICE_ROLE_KEY: updatedConfig.SUPABASE_SERVICE_ROLE_KEY || "",
-        IMGBB_API_KEY: updatedConfig.IMGBB_API_KEY || "",
-        PAYMENT_ACCOUNT: updatedConfig.PAYMENT_ACCOUNT || { bankName: "", bankBin: "", accountNumber: "", accountName: "" },
-        PRE_DISBURSEMENT_FEE: updatedConfig.PRE_DISBURSEMENT_FEE !== undefined ? updatedConfig.PRE_DISBURSEMENT_FEE : "",
-        MAX_EXTENSIONS: updatedConfig.MAX_EXTENSIONS !== undefined ? updatedConfig.MAX_EXTENSIONS : "",
-        UPGRADE_PERCENT: updatedConfig.UPGRADE_PERCENT !== undefined ? updatedConfig.UPGRADE_PERCENT : "",
-        FINE_RATE: updatedConfig.FINE_RATE !== undefined ? updatedConfig.FINE_RATE : "",
-        MAX_FINE_PERCENT: updatedConfig.MAX_FINE_PERCENT !== undefined ? updatedConfig.MAX_FINE_PERCENT : "30",
-        MAX_LOAN_PER_CYCLE: updatedConfig.MAX_LOAN_PER_CYCLE !== undefined ? updatedConfig.MAX_LOAN_PER_CYCLE : "10000000",
-        MIN_SYSTEM_BUDGET: updatedConfig.MIN_SYSTEM_BUDGET !== undefined ? updatedConfig.MIN_SYSTEM_BUDGET : "1000000",
-        MAX_SINGLE_LOAN_AMOUNT: updatedConfig.MAX_SINGLE_LOAN_AMOUNT !== undefined ? updatedConfig.MAX_SINGLE_LOAN_AMOUNT : "10000000"
-      }
+      message: "Cài đặt đã được lưu vĩnh viễn vào Supabase.",
+      settings: newConfig
     });
   } else {
-    res.status(500).json({ error: "Không thể lưu cài đặt" });
+    // Fallback to file if DB fails
+    saveConfig(newConfig);
+    res.json({ 
+      success: true, 
+      message: "Cài đặt đã được lưu vào tệp tin (Lưu ý: Có thể bị mất khi Vercel restart).",
+      settings: newConfig
+    });
   }
 });
 
