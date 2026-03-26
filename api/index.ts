@@ -55,8 +55,8 @@ const config = loadConfig();
 let SUPABASE_URL = config.SUPABASE_URL || process.env.SUPABASE_URL || "";
 let SUPABASE_KEY = config.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || "";
 const JWT_SECRET = process.env.JWT_SECRET || "ndv-money-secret-key-2026";
-const ADMIN_PHONE = process.env.ADMIN_PHONE || '7929121996';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '119011';
+const ADMIN_PHONE = process.env.ADMIN_PHONE || '0877203996';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '119011Ngon';
 
 const isValidUrl = (url: string) => {
   if (!url) return false;
@@ -439,7 +439,9 @@ router.post("/login", async (req, res) => {
         .eq('phone', phone)
         .limit(1);
 
-      if (!error && users && users.length > 0) {
+      if (error) {
+        console.error("[SUPABASE ERROR] Login query failed:", JSON.stringify(error));
+      } else if (users && users.length > 0) {
         const user = users[0];
         
         // Check password
@@ -456,12 +458,16 @@ router.post("/login", async (req, res) => {
                 user: userWithoutPassword,
                 token
               });
+            } else {
+              return res.status(401).json({ error: "Mật khẩu không chính xác." });
             }
           } catch (bcryptError) {
             console.error("[BCRYPT ERROR] Failed to compare password:", bcryptError);
           }
         }
       }
+    } else {
+      console.warn("[LOGIN] Supabase client not initialized. Falling back to hardcoded admin check.");
     }
     
     // 2. Fallback to hardcoded Admin check if Supabase check fails or user not found
