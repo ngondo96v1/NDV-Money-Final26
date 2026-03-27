@@ -6,6 +6,7 @@ import path from "path";
 import fs from "fs";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { PayOS } from "@payos/node";
 
 // Only try to load .env file if we're not in production (Vercel provides env vars directly)
 if (process.env.NODE_ENV !== "production") {
@@ -54,9 +55,6 @@ const config = loadConfig();
 
 let SUPABASE_URL = config.SUPABASE_URL || process.env.SUPABASE_URL || "";
 let SUPABASE_KEY = config.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || "";
-const JWT_SECRET = process.env.JWT_SECRET || "ndv-money-secret-key-2026";
-const ADMIN_PHONE = process.env.ADMIN_PHONE || '0877203996';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '119011Ngon';
 
 const isValidUrl = (url: string) => {
   if (!url) return false;
@@ -85,7 +83,8 @@ const loadSystemSettings = async (client: any) => {
         'PAYMENT_ACCOUNT', 'PRE_DISBURSEMENT_FEE', 'MAX_EXTENSIONS', 
         'UPGRADE_PERCENT', 'FINE_RATE', 'MAX_FINE_PERCENT', 
         'MAX_LOAN_PER_CYCLE', 'MIN_SYSTEM_BUDGET', 'MAX_SINGLE_LOAN_AMOUNT',
-        'IMGBB_API_KEY'
+        'IMGBB_API_KEY', 'PAYOS_CLIENT_ID', 'PAYOS_API_KEY', 'PAYOS_CHECKSUM_KEY',
+        'APP_URL', 'JWT_SECRET', 'ADMIN_PHONE', 'ADMIN_PASSWORD'
       ];
       if (systemKeys.includes(item.key)) {
         settings[item.key] = item.value;
@@ -96,6 +95,43 @@ const loadSystemSettings = async (client: any) => {
     console.error("[CONFIG] Failed to load settings from Supabase:", e);
     return {};
   }
+};
+
+// Helper to get merged settings
+const getMergedSettings = async (client: any) => {
+  const config = loadConfig();
+  const dbSettings = await loadSystemSettings(client);
+  
+  return {
+    SUPABASE_URL: config.SUPABASE_URL || process.env.SUPABASE_URL || "",
+    SUPABASE_SERVICE_ROLE_KEY: config.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || "",
+    IMGBB_API_KEY: dbSettings.IMGBB_API_KEY || config.IMGBB_API_KEY || process.env.VITE_IMGBB_API_KEY || "",
+    PAYMENT_ACCOUNT: dbSettings.PAYMENT_ACCOUNT || config.PAYMENT_ACCOUNT || { bankName: "", bankBin: "", accountNumber: "", accountName: "" },
+    PRE_DISBURSEMENT_FEE: dbSettings.PRE_DISBURSEMENT_FEE !== undefined ? dbSettings.PRE_DISBURSEMENT_FEE : (config.PRE_DISBURSEMENT_FEE !== undefined ? config.PRE_DISBURSEMENT_FEE : ""),
+    MAX_EXTENSIONS: dbSettings.MAX_EXTENSIONS !== undefined ? dbSettings.MAX_EXTENSIONS : (config.MAX_EXTENSIONS !== undefined ? config.MAX_EXTENSIONS : ""),
+    UPGRADE_PERCENT: dbSettings.UPGRADE_PERCENT !== undefined ? dbSettings.UPGRADE_PERCENT : (config.UPGRADE_PERCENT !== undefined ? config.UPGRADE_PERCENT : ""),
+    FINE_RATE: dbSettings.FINE_RATE !== undefined ? dbSettings.FINE_RATE : (config.FINE_RATE !== undefined ? config.FINE_RATE : ""),
+    MAX_FINE_PERCENT: dbSettings.MAX_FINE_PERCENT !== undefined ? dbSettings.MAX_FINE_PERCENT : (config.MAX_FINE_PERCENT !== undefined ? config.MAX_FINE_PERCENT : "30"),
+    MAX_LOAN_PER_CYCLE: dbSettings.MAX_LOAN_PER_CYCLE !== undefined ? dbSettings.MAX_LOAN_PER_CYCLE : (config.MAX_LOAN_PER_CYCLE !== undefined ? config.MAX_LOAN_PER_CYCLE : "10000000"),
+    MIN_SYSTEM_BUDGET: dbSettings.MIN_SYSTEM_BUDGET !== undefined ? dbSettings.MIN_SYSTEM_BUDGET : (config.MIN_SYSTEM_BUDGET !== undefined ? config.MIN_SYSTEM_BUDGET : "1000000"),
+    MAX_SINGLE_LOAN_AMOUNT: dbSettings.MAX_SINGLE_LOAN_AMOUNT !== undefined ? dbSettings.MAX_SINGLE_LOAN_AMOUNT : (config.MAX_SINGLE_LOAN_AMOUNT !== undefined ? config.MAX_SINGLE_LOAN_AMOUNT : "10000000"),
+    PAYOS_CLIENT_ID: dbSettings.PAYOS_CLIENT_ID || config.PAYOS_CLIENT_ID || process.env.PAYOS_CLIENT_ID || "",
+    PAYOS_API_KEY: dbSettings.PAYOS_API_KEY || config.PAYOS_API_KEY || process.env.PAYOS_API_KEY || "",
+    PAYOS_CHECKSUM_KEY: dbSettings.PAYOS_CHECKSUM_KEY || config.PAYOS_CHECKSUM_KEY || process.env.PAYOS_CHECKSUM_KEY || "",
+    APP_URL: dbSettings.APP_URL || config.APP_URL || process.env.APP_URL || "",
+    JWT_SECRET: dbSettings.JWT_SECRET || config.JWT_SECRET || process.env.JWT_SECRET || "ndv-money-secret-key-2026",
+    ADMIN_PHONE: dbSettings.ADMIN_PHONE || config.ADMIN_PHONE || process.env.ADMIN_PHONE || '0877203996',
+    ADMIN_PASSWORD: dbSettings.ADMIN_PASSWORD || config.ADMIN_PASSWORD || process.env.ADMIN_PASSWORD || '119011Ngon'
+  };
+};
+
+// Helper to get PayOS instance
+const getPayOS = (settings: any) => {
+  return new PayOS({
+    clientId: settings.PAYOS_CLIENT_ID || "",
+    apiKey: settings.PAYOS_API_KEY || "",
+    checksumKey: settings.PAYOS_CHECKSUM_KEY || ""
+  });
 };
 
 // Helper to save system settings to Supabase
@@ -219,7 +255,7 @@ router.use((req, res, next) => {
 });
 
 // Authentication Middleware
-const authenticateToken = (req: any, res: any, next: any) => {
+const authenticateToken = async (req: any, res: any, next: any) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
@@ -231,7 +267,10 @@ const authenticateToken = (req: any, res: any, next: any) => {
     return res.status(401).json({ error: "Yêu cầu xác thực" });
   }
 
-  jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
+  const client = initSupabase();
+  const settings = await getMergedSettings(client);
+
+  jwt.verify(token, settings.JWT_SECRET, (err: any, user: any) => {
     if (err) return res.status(403).json({ error: "Token không hợp lệ hoặc đã hết hạn" });
     req.user = user;
     next();
@@ -239,12 +278,12 @@ const authenticateToken = (req: any, res: any, next: any) => {
 };
 
 // Apply auth middleware to all routes except login/register/health
-router.use((req, res, next) => {
+router.use(async (req, res, next) => {
   const publicRoutes = ['/login', '/register', '/api-health', '/supabase-status', '/keep-alive'];
   if (publicRoutes.includes(req.path)) {
     return next();
   }
-  authenticateToken(req, res, next);
+  await authenticateToken(req, res, next);
 });
 
 // Helper to estimate JSON size in MB
@@ -394,25 +433,7 @@ router.get("/keep-alive", async (req, res) => {
 // API Routes
 router.get("/settings", async (req, res) => {
   const client = initSupabase();
-  const config = loadConfig();
-  const dbSettings = await loadSystemSettings(client);
-  
-  // Merge: Supabase settings override file settings
-  const merged = {
-    SUPABASE_URL: config.SUPABASE_URL || "",
-    SUPABASE_SERVICE_ROLE_KEY: config.SUPABASE_SERVICE_ROLE_KEY || "",
-    IMGBB_API_KEY: dbSettings.IMGBB_API_KEY || config.IMGBB_API_KEY || "",
-    PAYMENT_ACCOUNT: dbSettings.PAYMENT_ACCOUNT || config.PAYMENT_ACCOUNT || { bankName: "", bankBin: "", accountNumber: "", accountName: "" },
-    PRE_DISBURSEMENT_FEE: dbSettings.PRE_DISBURSEMENT_FEE !== undefined ? dbSettings.PRE_DISBURSEMENT_FEE : (config.PRE_DISBURSEMENT_FEE !== undefined ? config.PRE_DISBURSEMENT_FEE : ""),
-    MAX_EXTENSIONS: dbSettings.MAX_EXTENSIONS !== undefined ? dbSettings.MAX_EXTENSIONS : (config.MAX_EXTENSIONS !== undefined ? config.MAX_EXTENSIONS : ""),
-    UPGRADE_PERCENT: dbSettings.UPGRADE_PERCENT !== undefined ? dbSettings.UPGRADE_PERCENT : (config.UPGRADE_PERCENT !== undefined ? config.UPGRADE_PERCENT : ""),
-    FINE_RATE: dbSettings.FINE_RATE !== undefined ? dbSettings.FINE_RATE : (config.FINE_RATE !== undefined ? config.FINE_RATE : ""),
-    MAX_FINE_PERCENT: dbSettings.MAX_FINE_PERCENT !== undefined ? dbSettings.MAX_FINE_PERCENT : (config.MAX_FINE_PERCENT !== undefined ? config.MAX_FINE_PERCENT : "30"),
-    MAX_LOAN_PER_CYCLE: dbSettings.MAX_LOAN_PER_CYCLE !== undefined ? dbSettings.MAX_LOAN_PER_CYCLE : (config.MAX_LOAN_PER_CYCLE !== undefined ? config.MAX_LOAN_PER_CYCLE : "10000000"),
-    MIN_SYSTEM_BUDGET: dbSettings.MIN_SYSTEM_BUDGET !== undefined ? dbSettings.MIN_SYSTEM_BUDGET : (config.MIN_SYSTEM_BUDGET !== undefined ? config.MIN_SYSTEM_BUDGET : "1000000"),
-    MAX_SINGLE_LOAN_AMOUNT: dbSettings.MAX_SINGLE_LOAN_AMOUNT !== undefined ? dbSettings.MAX_SINGLE_LOAN_AMOUNT : (config.MAX_SINGLE_LOAN_AMOUNT !== undefined ? config.MAX_SINGLE_LOAN_AMOUNT : "10000000")
-  };
-  
+  const merged = await getMergedSettings(client);
   res.json(merged);
 });
 
@@ -440,7 +461,8 @@ router.post("/settings", async (req: any, res) => {
     'PAYMENT_ACCOUNT', 'PRE_DISBURSEMENT_FEE', 'MAX_EXTENSIONS', 
     'UPGRADE_PERCENT', 'FINE_RATE', 'MAX_FINE_PERCENT', 
     'MAX_LOAN_PER_CYCLE', 'MIN_SYSTEM_BUDGET', 'MAX_SINGLE_LOAN_AMOUNT',
-    'IMGBB_API_KEY'
+    'IMGBB_API_KEY', 'PAYOS_CLIENT_ID', 'PAYOS_API_KEY', 'PAYOS_CHECKSUM_KEY',
+    'APP_URL', 'JWT_SECRET', 'ADMIN_PHONE', 'ADMIN_PASSWORD'
   ];
   
   systemKeys.forEach(key => {
@@ -499,6 +521,7 @@ router.post("/login", async (req, res) => {
     const { phone, password } = req.body;
     
     const client = initSupabase();
+    const settings = await getMergedSettings(client);
     
     // 1. Try to find user in Supabase first
     if (client) {
@@ -520,7 +543,7 @@ router.post("/login", async (req, res) => {
             if (isMatch) {
               // Remove password before sending
               const { password: _, ...userWithoutPassword } = user;
-              const token = jwt.sign({ id: user.id, isAdmin: user.isAdmin }, JWT_SECRET, { expiresIn: '24h' });
+              const token = jwt.sign({ id: user.id, isAdmin: user.isAdmin }, settings.JWT_SECRET, { expiresIn: '24h' });
               
               return res.json({
                 success: true,
@@ -541,13 +564,13 @@ router.post("/login", async (req, res) => {
     
     // 2. Fallback to hardcoded Admin check if Supabase check fails or user not found
     // This ensures admin can always log in to fix configuration
-    if (phone === ADMIN_PHONE && password === ADMIN_PASSWORD) {
+    if (phone === settings.ADMIN_PHONE && password === settings.ADMIN_PASSWORD) {
       const adminUser = {
-        id: 'AD01', phone: ADMIN_PHONE, fullName: 'QUẢN TRỊ VIÊN', idNumber: 'SYSTEM_ADMIN',
+        id: 'AD01', phone: settings.ADMIN_PHONE, fullName: 'QUẢN TRỊ VIÊN', idNumber: 'SYSTEM_ADMIN',
         balance: 500000000, totalLimit: 500000000, rank: 'diamond', rankProgress: 10,
         isLoggedIn: true, isAdmin: true
       };
-      const token = jwt.sign({ id: adminUser.id, isAdmin: true }, JWT_SECRET, { expiresIn: '24h' });
+      const token = jwt.sign({ id: adminUser.id, isAdmin: true }, settings.JWT_SECRET, { expiresIn: '24h' });
       return res.json({
         success: true,
         user: adminUser,
@@ -568,6 +591,7 @@ router.post("/register", async (req, res) => {
   try {
     const client = initSupabase();
     if (!client) return res.status(503).json({ error: "Supabase not configured" });
+    const settings = await getMergedSettings(client);
     
     const userData = req.body;
     if (!userData || !userData.phone || !userData.password) {
@@ -601,7 +625,7 @@ router.post("/register", async (req, res) => {
     const { error: insertError } = await client.from('users').insert(sanitizedUser);
     if (insertError) throw insertError;
 
-    const token = jwt.sign({ id: sanitizedUser.id, isAdmin: false }, JWT_SECRET, { expiresIn: '24h' });
+    const token = jwt.sign({ id: sanitizedUser.id, isAdmin: false }, settings.JWT_SECRET, { expiresIn: '24h' });
     
     res.json({
       success: true,
@@ -1287,10 +1311,145 @@ router.get("/api-health", (req, res) => {
     status: "ok", 
     environment: process.env.NODE_ENV || 'production', 
     supabase: !!client,
+    payos: !!process.env.PAYOS_API_KEY,
     timestamp: new Date().toISOString(),
     url: req.url,
     method: req.method
   });
+});
+
+// --- PAYOS PAYMENT ROUTES ---
+
+// Create Payment Link
+router.post("/payment/create-link", async (req, res) => {
+  try {
+    const { loanId, amount, description } = req.body;
+    
+    if (!loanId || !amount) {
+      return res.status(400).json({ error: "Thiếu thông tin khoản vay hoặc số tiền" });
+    }
+
+    const client = initSupabase();
+    const settings = await getMergedSettings(client);
+    const payosInstance = getPayOS(settings);
+
+    // PayOS orderCode must be a number. We'll use a numeric part of the loanId or a random number.
+    // Let's use a timestamp + random to ensure uniqueness if needed, but we need to map it back.
+    // Actually, PayOS allows up to 10 digits for orderCode.
+    const orderCode = Number(Date.now().toString().slice(-9));
+
+    const domain = settings.APP_URL || `http://localhost:3000`;
+    
+    const body = {
+      orderCode: orderCode,
+      amount: Number(amount),
+      description: description || `Tat toan ${loanId}`,
+      cancelUrl: `${domain}/dashboard`,
+      returnUrl: `${domain}/dashboard?payment=success&loanId=${loanId}`,
+      // Store loanId in metadata if supported, or we'll have to use a mapping table.
+      // PayOS doesn't have a direct metadata field in createPaymentLink, 
+      // so we use the description or a mapping.
+      // For simplicity in this demo, we'll assume the description contains the loanId.
+    };
+
+    const paymentLinkResponse = await payosInstance.paymentRequests.create(body);
+    
+    // In a real app, you'd save the mapping between orderCode and loanId in your DB.
+    // Here we'll just return the link.
+    res.json({ 
+      success: true, 
+      checkoutUrl: paymentLinkResponse.checkoutUrl,
+      paymentLinkId: paymentLinkResponse.paymentLinkId,
+      orderCode: orderCode
+    });
+  } catch (e: any) {
+    console.error("PayOS Create Link Error:", e);
+    res.status(500).json({ error: "Internal Server Error", message: e.message });
+  }
+});
+
+// PayOS Webhook
+router.post("/payment/webhook", async (req, res) => {
+  try {
+    console.log("[PAYOS] Webhook received:", JSON.stringify(req.body));
+    
+    const client = initSupabase();
+    const settings = await getMergedSettings(client);
+    const payosInstance = getPayOS(settings);
+
+    // Verify the webhook data
+    const webhookData = await payosInstance.webhooks.verify(req.body);
+    
+    if (webhookData.code === '00') {
+      const orderCode = webhookData.orderCode;
+      const amount = webhookData.amount;
+      const description = webhookData.description; // "Tat toan LOAN_ID"
+      
+      // Extract loanId from description
+      const loanIdMatch = description.match(/Tat toan (.*)/);
+      const loanId = loanIdMatch ? loanIdMatch[1] : null;
+
+      if (loanId) {
+        // 1. Get the loan details
+        const { data: loan, error: loanError } = await client
+          .from('loans')
+          .select('*')
+          .eq('id', loanId)
+          .single();
+          
+        if (loan && !loanError) {
+          // 2. Update loan status to 'SETTLED'
+          const { error: updateError } = await client
+            .from('loans')
+            .update({ 
+              status: 'SETTLED', 
+              settledAt: new Date().toISOString(),
+              updatedAt: Date.now()
+            })
+            .eq('id', loanId);
+            
+          if (!updateError) {
+            // 3. Update user balance (restore limit)
+            const { data: user, error: userError } = await client
+              .from('users')
+              .select('balance, totalLimit')
+              .eq('id', loan.userId)
+              .single();
+              
+            if (user && !userError) {
+              const newBalance = (user.balance || 0) + loan.amount;
+              await client
+                .from('users')
+                .update({ balance: newBalance, updatedAt: Date.now() })
+                .eq('id', loan.userId);
+                
+              // 4. Notify client via Socket.io
+              const io = req.app.get("io");
+              if (io) {
+                io.to(`user_${loan.userId}`).emit("payment_success", { 
+                  loanId, 
+                  amount, 
+                  message: "Khoản vay của bạn đã được tất toán tự động!" 
+                });
+                // Also notify admin
+                io.to("admin").emit("admin_notification", {
+                  type: "PAYMENT",
+                  message: `Người dùng ${loan.userId} đã tất toán khoản vay ${loanId} qua PayOS.`
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    res.json({ status: "ok" });
+  } catch (e: any) {
+    console.error("PayOS Webhook Error:", e);
+    // PayOS expects a 200 response even if processing fails, 
+    // but we should log it.
+    res.json({ status: "error", message: e.message });
+  }
 });
 
 // Export the router

@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Database, Settings, AlertCircle, RefreshCw, X, Check, Download, Upload, Loader2, Search } from 'lucide-react';
+import { Database, Settings, AlertCircle, RefreshCw, X, Check, Download, Upload, Loader2, Search, Copy, ChevronDown, ChevronUp } from 'lucide-react';
 import BankSearchableSelect from './BankSearchableSelect';
 
 interface AdminSystemProps {
@@ -21,7 +21,104 @@ const AdminSystem: React.FC<AdminSystemProps> = ({ onReset, onImportSuccess, onB
   const [isCheckingBank, setIsCheckingBank] = useState(false);
   const [importMessage, setImportMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [settingsMessage, setSettingsMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
+    supabase: false,
+    imgbb: false,
+    payos: false,
+    admin: false,
+    tools: false,
+    payment: false,
+    fees: false
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const toggleSection = (section: string) => {
+    setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
+  };
+
+  const copyToClipboard = (text: string, field: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 2000);
+  };
+
+  const sqlSchema = `-- SQL Schema for NDV Money App
+-- Run this in your Supabase SQL Editor
+
+-- 1. Users Table
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  phone TEXT UNIQUE NOT NULL,
+  "fullName" TEXT,
+  "idNumber" TEXT,
+  balance NUMERIC DEFAULT 0,
+  "totalLimit" NUMERIC DEFAULT 0,
+  rank TEXT DEFAULT 'standard',
+  "rankProgress" NUMERIC DEFAULT 0,
+  "isLoggedIn" BOOLEAN DEFAULT false,
+  "isAdmin" BOOLEAN DEFAULT false,
+  "pendingUpgradeRank" TEXT,
+  "rankUpgradeBill" TEXT,
+  address TEXT,
+  "joinDate" TEXT,
+  "idFront" TEXT,
+  "idBack" TEXT,
+  "refZalo" TEXT,
+  relationship TEXT,
+  password TEXT,
+  "lastLoanSeq" INTEGER DEFAULT 0,
+  "bankName" TEXT,
+  "bankAccountNumber" TEXT,
+  "bankAccountHolder" TEXT,
+  "hasJoinedZalo" BOOLEAN DEFAULT false,
+  "updatedAt" BIGINT
+);
+
+-- 2. Loans Table
+CREATE TABLE IF NOT EXISTS loans (
+  id TEXT PRIMARY KEY,
+  "userId" TEXT REFERENCES users(id),
+  "userName" TEXT,
+  amount NUMERIC NOT NULL,
+  date TEXT,
+  "createdAt" TEXT,
+  status TEXT NOT NULL,
+  fine NUMERIC DEFAULT 0,
+  "billImage" TEXT,
+  "bankTransactionId" TEXT,
+  "settlementType" TEXT,
+  signature TEXT,
+  "rejectionReason" TEXT,
+  "principalPaymentCount" INTEGER DEFAULT 0,
+  "extensionCount" INTEGER DEFAULT 0,
+  "updatedAt" BIGINT
+);
+
+-- 3. Notifications Table
+CREATE TABLE IF NOT EXISTS notifications (
+  id TEXT PRIMARY KEY,
+  "userId" TEXT REFERENCES users(id),
+  title TEXT,
+  message TEXT,
+  time TEXT,
+  read BOOLEAN DEFAULT false,
+  type TEXT
+);
+
+-- 4. Config Table (for system settings)
+CREATE TABLE IF NOT EXISTS config (
+  key TEXT PRIMARY KEY,
+  value JSONB
+);
+
+-- Insert default config values
+INSERT INTO config (key, value) VALUES 
+('budget', '30000000'),
+('rankProfit', '0'),
+('loanProfit', '0'),
+('monthlyStats', '[]')
+ON CONFLICT (key) DO NOTHING;`;
   
   const formatNumberWithDots = (val: string | number) => {
     if (val === undefined || val === null || val === '') return '';
@@ -45,7 +142,14 @@ const AdminSystem: React.FC<AdminSystemProps> = ({ onReset, onImportSuccess, onB
     MAX_FINE_PERCENT: '30',
     MAX_LOAN_PER_CYCLE: '10000000',
     MIN_SYSTEM_BUDGET: '1000000',
-    MAX_SINGLE_LOAN_AMOUNT: '10000000'
+    MAX_SINGLE_LOAN_AMOUNT: '10000000',
+    PAYOS_CLIENT_ID: '',
+    PAYOS_API_KEY: '',
+    PAYOS_CHECKSUM_KEY: '',
+    APP_URL: '',
+    JWT_SECRET: '',
+    ADMIN_PHONE: '',
+    ADMIN_PASSWORD: ''
   };
 
   const [localSettings, setLocalSettings] = useState<any>(() => {
@@ -115,6 +219,27 @@ const AdminSystem: React.FC<AdminSystemProps> = ({ onReset, onImportSuccess, onB
 
       if (localSettings.MAX_SINGLE_LOAN_AMOUNT !== settings?.MAX_SINGLE_LOAN_AMOUNT)
         changedSettings.MAX_SINGLE_LOAN_AMOUNT = localSettings.MAX_SINGLE_LOAN_AMOUNT;
+
+      if (localSettings.PAYOS_CLIENT_ID !== settings?.PAYOS_CLIENT_ID)
+        changedSettings.PAYOS_CLIENT_ID = localSettings.PAYOS_CLIENT_ID;
+
+      if (localSettings.PAYOS_API_KEY !== settings?.PAYOS_API_KEY)
+        changedSettings.PAYOS_API_KEY = localSettings.PAYOS_API_KEY;
+
+      if (localSettings.PAYOS_CHECKSUM_KEY !== settings?.PAYOS_CHECKSUM_KEY)
+        changedSettings.PAYOS_CHECKSUM_KEY = localSettings.PAYOS_CHECKSUM_KEY;
+
+      if (localSettings.APP_URL !== settings?.APP_URL)
+        changedSettings.APP_URL = localSettings.APP_URL;
+
+      if (localSettings.JWT_SECRET !== settings?.JWT_SECRET)
+        changedSettings.JWT_SECRET = localSettings.JWT_SECRET;
+
+      if (localSettings.ADMIN_PHONE !== settings?.ADMIN_PHONE)
+        changedSettings.ADMIN_PHONE = localSettings.ADMIN_PHONE;
+
+      if (localSettings.ADMIN_PASSWORD !== settings?.ADMIN_PASSWORD)
+        changedSettings.ADMIN_PASSWORD = localSettings.ADMIN_PASSWORD;
 
       if (Object.keys(changedSettings).length === 0) {
         setSettingsMessage({ type: 'error', text: 'Không có thay đổi nào để lưu' });
@@ -390,181 +515,366 @@ const AdminSystem: React.FC<AdminSystemProps> = ({ onReset, onImportSuccess, onB
           <div className="space-y-6">
             {/* Supabase Config */}
             <div className="space-y-4 pt-2 border-t border-white/5">
-              <h5 className="text-[8px] font-black text-[#ff8c00] uppercase tracking-widest">Cấu hình Supabase</h5>
-              <div className="space-y-2">
-                <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Supabase URL</label>
-                <input 
-                  type="text" 
-                  value={localSettings.SUPABASE_URL || ''}
-                  onChange={(e) => setLocalSettings({...localSettings, SUPABASE_URL: e.target.value})}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Supabase Service Role Key</label>
-                <input 
-                  type="password" 
-                  value={localSettings.SUPABASE_SERVICE_ROLE_KEY || ''}
-                  onChange={(e) => setLocalSettings({...localSettings, SUPABASE_SERVICE_ROLE_KEY: e.target.value})}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
-                />
-              </div>
+              <button 
+                onClick={() => toggleSection('supabase')}
+                className="w-full flex items-center justify-between group"
+              >
+                <h5 className="text-[8px] font-black text-[#ff8c00] uppercase tracking-widest">Cấu hình Supabase</h5>
+                {expandedSections.supabase ? <ChevronUp size={12} className="text-gray-500" /> : <ChevronDown size={12} className="text-gray-500" />}
+              </button>
+              
+              {expandedSections.supabase && (
+                <div className="space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <div className="space-y-2">
+                    <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Supabase URL</label>
+                    <input 
+                      type="text" 
+                      value={localSettings.SUPABASE_URL || ''}
+                      onChange={(e) => setLocalSettings({...localSettings, SUPABASE_URL: e.target.value})}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Supabase Service Role Key</label>
+                    <input 
+                      type="password" 
+                      value={localSettings.SUPABASE_SERVICE_ROLE_KEY || ''}
+                      onChange={(e) => setLocalSettings({...localSettings, SUPABASE_SERVICE_ROLE_KEY: e.target.value})}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* ImgBB Config */}
             <div className="space-y-4 pt-4 border-t border-white/5">
-              <h5 className="text-[8px] font-black text-[#ff8c00] uppercase tracking-widest">Cấu hình ImgBB</h5>
-              <div className="space-y-2">
-                <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">ImgBB API Key</label>
-                <input 
-                  type="text" 
-                  value={localSettings.IMGBB_API_KEY || ''}
-                  onChange={(e) => setLocalSettings({...localSettings, IMGBB_API_KEY: e.target.value})}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
-                />
-              </div>
+              <button 
+                onClick={() => toggleSection('imgbb')}
+                className="w-full flex items-center justify-between group"
+              >
+                <h5 className="text-[8px] font-black text-[#ff8c00] uppercase tracking-widest">Cấu hình ImgBB</h5>
+                {expandedSections.imgbb ? <ChevronUp size={12} className="text-gray-500" /> : <ChevronDown size={12} className="text-gray-500" />}
+              </button>
+
+              {expandedSections.imgbb && (
+                <div className="space-y-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">ImgBB API Key</label>
+                  <input 
+                    type="text" 
+                    value={localSettings.IMGBB_API_KEY || ''}
+                    onChange={(e) => setLocalSettings({...localSettings, IMGBB_API_KEY: e.target.value})}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* PayOS Config */}
+            <div className="space-y-4 pt-4 border-t border-white/5">
+              <button 
+                onClick={() => toggleSection('payos')}
+                className="w-full flex items-center justify-between group"
+              >
+                <h5 className="text-[8px] font-black text-[#ff8c00] uppercase tracking-widest">Cấu hình PayOS</h5>
+                {expandedSections.payos ? <ChevronUp size={12} className="text-gray-500" /> : <ChevronDown size={12} className="text-gray-500" />}
+              </button>
+
+              {expandedSections.payos && (
+                <div className="space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">PayOS Client ID</label>
+                      <input 
+                        type="text" 
+                        value={localSettings.PAYOS_CLIENT_ID || ''}
+                        onChange={(e) => setLocalSettings({...localSettings, PAYOS_CLIENT_ID: e.target.value})}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">PayOS API Key</label>
+                      <input 
+                        type="password" 
+                        value={localSettings.PAYOS_API_KEY || ''}
+                        onChange={(e) => setLocalSettings({...localSettings, PAYOS_API_KEY: e.target.value})}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">PayOS Checksum Key</label>
+                    <input 
+                      type="password" 
+                      value={localSettings.PAYOS_CHECKSUM_KEY || ''}
+                      onChange={(e) => setLocalSettings({...localSettings, PAYOS_CHECKSUM_KEY: e.target.value})}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Admin Credentials & JWT */}
+            <div className="space-y-4 pt-4 border-t border-white/5">
+              <button 
+                onClick={() => toggleSection('admin')}
+                className="w-full flex items-center justify-between group"
+              >
+                <h5 className="text-[8px] font-black text-[#ff8c00] uppercase tracking-widest">Tài khoản Admin & Bảo mật</h5>
+                {expandedSections.admin ? <ChevronUp size={12} className="text-gray-500" /> : <ChevronDown size={12} className="text-gray-500" />}
+              </button>
+
+              {expandedSections.admin && (
+                <div className="space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Số điện thoại Admin</label>
+                      <input 
+                        type="text" 
+                        value={localSettings.ADMIN_PHONE || ''}
+                        onChange={(e) => setLocalSettings({...localSettings, ADMIN_PHONE: e.target.value})}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Mật khẩu Admin</label>
+                      <input 
+                        type="password" 
+                        value={localSettings.ADMIN_PASSWORD || ''}
+                        onChange={(e) => setLocalSettings({...localSettings, ADMIN_PASSWORD: e.target.value})}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">JWT Secret</label>
+                    <input 
+                      type="password" 
+                      value={localSettings.JWT_SECRET || ''}
+                      onChange={(e) => setLocalSettings({...localSettings, JWT_SECRET: e.target.value})}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Quick Actions / Copy Buttons */}
+            <div className="space-y-4 pt-6 border-t border-white/5">
+              <button 
+                onClick={() => toggleSection('tools')}
+                className="w-full flex items-center justify-between group"
+              >
+                <h5 className="text-[8px] font-black text-[#ff8c00] uppercase tracking-widest">Tiện ích & Công cụ</h5>
+                {expandedSections.tools ? <ChevronUp size={12} className="text-gray-500" /> : <ChevronDown size={12} className="text-gray-500" />}
+              </button>
+
+              {expandedSections.tools && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <button
+                    onClick={() => copyToClipboard(sqlSchema, 'sql')}
+                    className="flex items-center justify-between px-4 py-3 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 transition-all group"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Database size={14} className="text-[#ff8c00]" />
+                      <span className="text-[9px] font-black text-white uppercase tracking-widest">Lấy mã SQL</span>
+                    </div>
+                    {copiedField === 'sql' ? (
+                      <Check size={14} className="text-green-500" />
+                    ) : (
+                      <Copy size={14} className="text-gray-500 group-hover:text-white transition-colors" />
+                    )}
+                  </button>
+
+                  <button
+                    onClick={() => copyToClipboard(`${localSettings.APP_URL || window.location.origin}/api/payment/webhook`, 'webhook')}
+                    className="flex items-center justify-between px-4 py-3 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 transition-all group"
+                  >
+                    <div className="flex items-center gap-3">
+                      <RefreshCw size={14} className="text-[#ff8c00]" />
+                      <span className="text-[9px] font-black text-white uppercase tracking-widest">Lấy Webhook</span>
+                    </div>
+                    {copiedField === 'webhook' ? (
+                      <Check size={14} className="text-green-500" />
+                    ) : (
+                      <Copy size={14} className="text-gray-500 group-hover:text-white transition-colors" />
+                    )}
+                  </button>
+
+                  <button
+                    onClick={() => copyToClipboard(localSettings.APP_URL || window.location.origin, 'appurl')}
+                    className="flex items-center justify-between px-4 py-3 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 transition-all group"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Settings size={14} className="text-[#ff8c00]" />
+                      <span className="text-[9px] font-black text-white uppercase tracking-widest">Lấy App URL</span>
+                    </div>
+                    {copiedField === 'appurl' ? (
+                      <Check size={14} className="text-green-500" />
+                    ) : (
+                      <Copy size={14} className="text-gray-500 group-hover:text-white transition-colors" />
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Payment Account Config */}
             <div className="space-y-4 pt-4 border-t border-white/5">
-              <h5 className="text-[8px] font-black text-[#ff8c00] uppercase tracking-widest">Tài khoản nhận thanh toán</h5>
-              <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
-                <div className="grid grid-cols-2 gap-2">
-                  <BankSearchableSelect 
-                    value={localSettings.PAYMENT_ACCOUNT?.bankName || ''}
-                    onChange={(bankName, bin) => setLocalSettings({
-                      ...localSettings, 
-                      PAYMENT_ACCOUNT: { ...(localSettings.PAYMENT_ACCOUNT || {}), bankName, bankBin: bin }
-                    })}
-                    className="w-full"
-                  />
-                  <input 
-                    type="text" 
-                    inputMode="numeric"
-                    value={localSettings.PAYMENT_ACCOUNT?.accountNumber || ''}
-                    onChange={(e) => setLocalSettings({
-                      ...localSettings, 
-                      PAYMENT_ACCOUNT: { ...(localSettings.PAYMENT_ACCOUNT || {}), accountNumber: e.target.value.replace(/\D/g, '') }
-                    })}
-                    className="bg-black border border-white/10 rounded-xl px-3 py-2 text-[9px] font-bold text-white outline-none"
-                  />
+              <button 
+                onClick={() => toggleSection('payment')}
+                className="w-full flex items-center justify-between group"
+              >
+                <h5 className="text-[8px] font-black text-[#ff8c00] uppercase tracking-widest">Tài khoản nhận thanh toán</h5>
+                {expandedSections.payment ? <ChevronUp size={12} className="text-gray-500" /> : <ChevronDown size={12} className="text-gray-500" />}
+              </button>
+
+              {expandedSections.payment && (
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <div className="grid grid-cols-2 gap-2">
+                    <BankSearchableSelect 
+                      value={localSettings.PAYMENT_ACCOUNT?.bankName || ''}
+                      onChange={(bankName, bin) => setLocalSettings({
+                        ...localSettings, 
+                        PAYMENT_ACCOUNT: { ...(localSettings.PAYMENT_ACCOUNT || {}), bankName, bankBin: bin }
+                      })}
+                      className="w-full"
+                    />
+                    <input 
+                      type="text" 
+                      inputMode="numeric"
+                      value={localSettings.PAYMENT_ACCOUNT?.accountNumber || ''}
+                      onChange={(e) => setLocalSettings({
+                        ...localSettings, 
+                        PAYMENT_ACCOUNT: { ...(localSettings.PAYMENT_ACCOUNT || {}), accountNumber: e.target.value.replace(/\D/g, '') }
+                      })}
+                      className="bg-black border border-white/10 rounded-xl px-3 py-2 text-[9px] font-bold text-white outline-none"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <input 
+                      type="text" 
+                      value={localSettings.PAYMENT_ACCOUNT?.accountName || ''}
+                      onChange={(e) => setLocalSettings({
+                        ...localSettings, 
+                        PAYMENT_ACCOUNT: { ...(localSettings.PAYMENT_ACCOUNT || {}), accountName: e.target.value.toUpperCase() }
+                      })}
+                      className="flex-1 bg-black border border-white/10 rounded-xl px-3 py-2 text-[9px] font-black text-[#ff8c00] uppercase outline-none"
+                    />
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <input 
-                    type="text" 
-                    value={localSettings.PAYMENT_ACCOUNT?.accountName || ''}
-                    onChange={(e) => setLocalSettings({
-                      ...localSettings, 
-                      PAYMENT_ACCOUNT: { ...(localSettings.PAYMENT_ACCOUNT || {}), accountName: e.target.value.toUpperCase() }
-                    })}
-                    className="flex-1 bg-black border border-white/10 rounded-xl px-3 py-2 text-[9px] font-black text-[#ff8c00] uppercase outline-none"
-                  />
-                </div>
-              </div>
+              )}
             </div>
             <div className="space-y-6 pt-6 border-t border-white/5">
-              <div className="flex items-center justify-between">
+              <button 
+                onClick={() => toggleSection('fees')}
+                className="w-full flex items-center justify-between group"
+              >
                 <h5 className="text-[8px] font-black text-[#ff8c00] uppercase tracking-widest flex items-center gap-2">
                   <div className="w-1 h-3 bg-[#ff8c00] rounded-full" />
                   Phí & Hạn mức
                 </h5>
-              </div>
+                {expandedSections.fees ? <ChevronUp size={12} className="text-gray-500" /> : <ChevronDown size={12} className="text-gray-500" />}
+              </button>
               
-              <div className="grid grid-cols-2 gap-x-3 gap-y-4">
-                {/* Row 1 */}
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest px-1">Phí giải ngân (%)</label>
-                  <input 
-                    type="text" 
-                    inputMode="numeric"
-                    value={formatNumberWithDots(localSettings.PRE_DISBURSEMENT_FEE)}
-                    onChange={(e) => setLocalSettings({...localSettings, PRE_DISBURSEMENT_FEE: parseNumberFromDots(e.target.value)})}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-bold text-white outline-none focus:border-[#ff8c00]/50 focus:bg-white/10 transition-all"
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest px-1">Gia hạn tối đa</label>
-                  <input 
-                    type="text" 
-                    inputMode="numeric"
-                    value={formatNumberWithDots(localSettings.MAX_EXTENSIONS)}
-                    onChange={(e) => setLocalSettings({...localSettings, MAX_EXTENSIONS: parseNumberFromDots(e.target.value)})}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-bold text-white outline-none focus:border-[#ff8c00]/50 focus:bg-white/10 transition-all"
-                  />
-                </div>
+              {expandedSections.fees && (
+                <div className="grid grid-cols-2 gap-x-3 gap-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                  {/* Row 1 */}
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest px-1">Phí giải ngân (%)</label>
+                    <input 
+                      type="text" 
+                      inputMode="numeric"
+                      value={formatNumberWithDots(localSettings.PRE_DISBURSEMENT_FEE)}
+                      onChange={(e) => setLocalSettings({...localSettings, PRE_DISBURSEMENT_FEE: parseNumberFromDots(e.target.value)})}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-bold text-white outline-none focus:border-[#ff8c00]/50 focus:bg-white/10 transition-all"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest px-1">Gia hạn tối đa</label>
+                    <input 
+                      type="text" 
+                      inputMode="numeric"
+                      value={formatNumberWithDots(localSettings.MAX_EXTENSIONS)}
+                      onChange={(e) => setLocalSettings({...localSettings, MAX_EXTENSIONS: parseNumberFromDots(e.target.value)})}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-bold text-white outline-none focus:border-[#ff8c00]/50 focus:bg-white/10 transition-all"
+                    />
+                  </div>
 
-                {/* Row 2 */}
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest px-1">Phí nâng hạng (%)</label>
-                  <input 
-                    type="text" 
-                    inputMode="numeric"
-                    value={formatNumberWithDots(localSettings.UPGRADE_PERCENT)}
-                    onChange={(e) => setLocalSettings({...localSettings, UPGRADE_PERCENT: parseNumberFromDots(e.target.value)})}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-bold text-white outline-none focus:border-[#ff8c00]/50 focus:bg-white/10 transition-all"
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest px-1">Phí quá hạn (%/ngày)</label>
-                  <input 
-                    type="text" 
-                    inputMode="decimal"
-                    value={localSettings.FINE_RATE || ''}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      if (val === '' || /^[0-9]*\.?[0-9]*$/.test(val)) {
-                        setLocalSettings({...localSettings, FINE_RATE: val});
-                      }
-                    }}
-                    placeholder="0.00"
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-bold text-white outline-none focus:border-[#ff8c00]/50 focus:bg-white/10 transition-all"
-                  />
-                </div>
+                  {/* Row 2 */}
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest px-1">Phí nâng hạng (%)</label>
+                    <input 
+                      type="text" 
+                      inputMode="numeric"
+                      value={formatNumberWithDots(localSettings.UPGRADE_PERCENT)}
+                      onChange={(e) => setLocalSettings({...localSettings, UPGRADE_PERCENT: parseNumberFromDots(e.target.value)})}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-bold text-white outline-none focus:border-[#ff8c00]/50 focus:bg-white/10 transition-all"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest px-1">Phí quá hạn (%/ngày)</label>
+                    <input 
+                      type="text" 
+                      inputMode="decimal"
+                      value={localSettings.FINE_RATE || ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === '' || /^[0-9]*\.?[0-9]*$/.test(val)) {
+                          setLocalSettings({...localSettings, FINE_RATE: val});
+                        }
+                      }}
+                      placeholder="0.00"
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-bold text-white outline-none focus:border-[#ff8c00]/50 focus:bg-white/10 transition-all"
+                    />
+                  </div>
 
-                {/* Row 3 */}
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest px-1">Phạt tối đa (%)</label>
-                  <input 
-                    type="text" 
-                    inputMode="numeric"
-                    value={formatNumberWithDots(localSettings.MAX_FINE_PERCENT)}
-                    onChange={(e) => setLocalSettings({...localSettings, MAX_FINE_PERCENT: parseNumberFromDots(e.target.value)})}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-bold text-white outline-none focus:border-[#ff8c00]/50 focus:bg-white/10 transition-all"
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest px-1">Hạn mức chu kỳ</label>
-                  <input 
-                    type="text" 
-                    inputMode="numeric"
-                    value={formatNumberWithDots(localSettings.MAX_LOAN_PER_CYCLE)}
-                    onChange={(e) => setLocalSettings({...localSettings, MAX_LOAN_PER_CYCLE: parseNumberFromDots(e.target.value)})}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-bold text-white outline-none focus:border-[#ff8c00]/50 focus:bg-white/10 transition-all"
-                  />
-                </div>
+                  {/* Row 3 */}
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest px-1">Phạt tối đa (%)</label>
+                    <input 
+                      type="text" 
+                      inputMode="numeric"
+                      value={formatNumberWithDots(localSettings.MAX_FINE_PERCENT)}
+                      onChange={(e) => setLocalSettings({...localSettings, MAX_FINE_PERCENT: parseNumberFromDots(e.target.value)})}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-bold text-white outline-none focus:border-[#ff8c00]/50 focus:bg-white/10 transition-all"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest px-1">Hạn mức chu kỳ</label>
+                    <input 
+                      type="text" 
+                      inputMode="numeric"
+                      value={formatNumberWithDots(localSettings.MAX_LOAN_PER_CYCLE)}
+                      onChange={(e) => setLocalSettings({...localSettings, MAX_LOAN_PER_CYCLE: parseNumberFromDots(e.target.value)})}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-bold text-white outline-none focus:border-[#ff8c00]/50 focus:bg-white/10 transition-all"
+                    />
+                  </div>
 
-                {/* Row 4 */}
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest px-1">Ngân sách tối thiểu</label>
-                  <input 
-                    type="text" 
-                    inputMode="numeric"
-                    value={formatNumberWithDots(localSettings.MIN_SYSTEM_BUDGET)}
-                    onChange={(e) => setLocalSettings({...localSettings, MIN_SYSTEM_BUDGET: parseNumberFromDots(e.target.value)})}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-bold text-white outline-none focus:border-[#ff8c00]/50 focus:bg-white/10 transition-all"
-                  />
+                  {/* Row 4 */}
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest px-1">Ngân sách tối thiểu</label>
+                    <input 
+                      type="text" 
+                      inputMode="numeric"
+                      value={formatNumberWithDots(localSettings.MIN_SYSTEM_BUDGET)}
+                      onChange={(e) => setLocalSettings({...localSettings, MIN_SYSTEM_BUDGET: parseNumberFromDots(e.target.value)})}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-bold text-white outline-none focus:border-[#ff8c00]/50 focus:bg-white/10 transition-all"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest px-1">Hạn mức vay tối đa</label>
+                    <input 
+                      type="text" 
+                      inputMode="numeric"
+                      value={formatNumberWithDots(localSettings.MAX_SINGLE_LOAN_AMOUNT)}
+                      onChange={(e) => setLocalSettings({...localSettings, MAX_SINGLE_LOAN_AMOUNT: parseNumberFromDots(e.target.value)})}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-bold text-white outline-none focus:border-[#ff8c00]/50 focus:bg-white/10 transition-all"
+                    />
+                  </div>
                 </div>
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest px-1">Hạn mức vay tối đa</label>
-                  <input 
-                    type="text" 
-                    inputMode="numeric"
-                    value={formatNumberWithDots(localSettings.MAX_SINGLE_LOAN_AMOUNT)}
-                    onChange={(e) => setLocalSettings({...localSettings, MAX_SINGLE_LOAN_AMOUNT: parseNumberFromDots(e.target.value)})}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-bold text-white outline-none focus:border-[#ff8c00]/50 focus:bg-white/10 transition-all"
-                  />
-                </div>
-              </div>
+              )}
             </div>
 
             {settingsMessage && (

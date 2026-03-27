@@ -77,6 +77,37 @@ const App: React.FC = () => {
     return localStorage.getItem('vnv_token');
   });
 
+  const handlePayOSSettle = async (loan: LoanRecord) => {
+    if (isPayOSProcessing) return;
+    setIsPayOSProcessing(true);
+    setIsGlobalProcessing(true);
+    
+    try {
+      const response = await authenticatedFetch('/api/payment/create-link', {
+        method: 'POST',
+        body: JSON.stringify({
+          loanId: loan.id,
+          amount: loan.amount + (loan.fine || 0),
+          description: `Tat toan ${loan.id}`
+        })
+      });
+      
+      const data = await response.json();
+      if (data.success && data.checkoutUrl) {
+        // Redirect to PayOS checkout page
+        window.location.href = data.checkoutUrl;
+      } else {
+        alert("Không thể tạo link thanh toán. Vui lòng thử lại sau.");
+      }
+    } catch (e) {
+      console.error("PayOS Settle Error:", e);
+      alert("Đã xảy ra lỗi khi kết nối với cổng thanh toán.");
+    } finally {
+      setIsPayOSProcessing(false);
+      setIsGlobalProcessing(false);
+    }
+  };
+
   const handleLogout = () => {
     setUser(null);
     setToken(null);
@@ -181,6 +212,8 @@ const App: React.FC = () => {
   const [showSecurityModal, setShowSecurityModal] = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [showBankInfoModal, setShowBankInfoModal] = useState(false);
+  const [isPayOSProcessing, setIsPayOSProcessing] = useState(false);
+  const [payOSModal, setPayOSModal] = useState<{ show: boolean; url: string; loanId: string } | null>(null);
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
   const [settings, setSettings] = useState<AppSettings>({
     SUPABASE_URL: '',
@@ -1825,6 +1858,7 @@ const App: React.FC = () => {
               setSettleLoanFromDash(loan);
               setCurrentView(AppView.APPLY_LOAN);
             }}
+            onPayOSSettle={handlePayOSSettle}
             onViewContract={(loan) => {
               setViewLoanFromDash(loan);
               setCurrentView(AppView.APPLY_LOAN);
@@ -1956,6 +1990,7 @@ const App: React.FC = () => {
               setSettleLoanFromDash(loan);
               setCurrentView(AppView.APPLY_LOAN);
             }}
+            onPayOSSettle={handlePayOSSettle}
             onViewContract={(loan) => {
               setViewLoanFromDash(loan);
               setCurrentView(AppView.APPLY_LOAN);

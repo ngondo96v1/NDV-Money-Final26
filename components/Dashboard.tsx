@@ -13,6 +13,7 @@ interface DashboardProps {
   onLogout: () => void;
   onViewAllLoans: () => void;
   onSettleLoan?: (loan: LoanRecord) => void;
+  onPayOSSettle?: (loan: LoanRecord) => void;
   onViewContract?: (loan: LoanRecord) => void;
   onMarkNotificationRead?: (id: string) => void;
   onMarkAllNotificationsRead?: () => void;
@@ -28,6 +29,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   onLogout, 
   onViewAllLoans, 
   onSettleLoan, 
+  onPayOSSettle,
   onViewContract,
   onMarkNotificationRead,
   onMarkAllNotificationsRead,
@@ -314,12 +316,22 @@ const Dashboard: React.FC<DashboardProps> = ({
                          <Eye size={14} />
                        </button>
                        {(item.status === 'ĐANG NỢ' || item.status === 'ĐANG GIẢI NGÂN') && (
-                         <button 
-                           onClick={() => onSettleLoan?.(item)}
-                           className="bg-white text-black font-black px-2.5 py-1.5 rounded-lg text-[7px] uppercase tracking-widest active:scale-95 transition-all"
-                         >
-                           Tất toán
-                         </button>
+                         <div className="flex gap-1">
+                           <button 
+                             onClick={() => onSettleLoan?.(item)}
+                             className="bg-white text-black font-black px-2 py-1.5 rounded-lg text-[7px] uppercase tracking-widest active:scale-95 transition-all"
+                           >
+                             Tất toán
+                           </button>
+                           {onPayOSSettle && (
+                             <button 
+                               onClick={() => onPayOSSettle(item)}
+                               className="bg-orange-500 text-white font-black px-2 py-1.5 rounded-lg text-[7px] uppercase tracking-widest active:scale-95 transition-all"
+                             >
+                               PayOS
+                             </button>
+                           )}
+                         </div>
                        )}
                     </div>
                   </div>
