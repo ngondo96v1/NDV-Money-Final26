@@ -260,8 +260,9 @@ const authenticateToken = async (req: any, res: any, next: any) => {
   const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) {
-    // Allow login and register without token
-    if (req.path === '/login' || req.path === '/register' || req.path === '/api-health' || req.path === '/supabase-status') {
+    // Allow login, register, and webhook without token
+    const publicRoutes = ['/login', '/register', '/api-health', '/supabase-status', '/payment/webhook'];
+    if (publicRoutes.includes(req.path)) {
       return next();
     }
     return res.status(401).json({ error: "Yêu cầu xác thực" });
@@ -277,9 +278,9 @@ const authenticateToken = async (req: any, res: any, next: any) => {
   });
 };
 
-// Apply auth middleware to all routes except login/register/health
+// Apply auth middleware to all routes except login/register/health/webhook
 router.use(async (req, res, next) => {
-  const publicRoutes = ['/login', '/register', '/api-health', '/supabase-status', '/keep-alive'];
+  const publicRoutes = ['/login', '/register', '/api-health', '/supabase-status', '/keep-alive', '/payment/webhook'];
   if (publicRoutes.includes(req.path)) {
     return next();
   }
