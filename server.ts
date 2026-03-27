@@ -11,7 +11,7 @@ import http from "http";
 // Load environment variables from .env file
 dotenv.config();
 
-import { apiRouter, keepAliveSupabase } from "./api/index";
+import { apiRouter, keepAliveSupabase } from "./api/index.ts";
 
 async function startServer() {
   const app = express();
