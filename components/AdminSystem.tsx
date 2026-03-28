@@ -99,6 +99,10 @@ CREATE TABLE IF NOT EXISTS users (
   "bankAccountNumber" TEXT,
   "bankAccountHolder" TEXT,
   "hasJoinedZalo" BOOLEAN DEFAULT false,
+  "payosOrderCode" TEXT,
+  "payosCheckoutUrl" TEXT,
+  "payosAmount" NUMERIC,
+  "payosExpireAt" BIGINT,
   "updatedAt" BIGINT
 );
 
@@ -115,10 +119,15 @@ CREATE TABLE IF NOT EXISTS loans (
   "billImage" TEXT,
   "bankTransactionId" TEXT,
   "settlementType" TEXT,
+  "partialAmount" NUMERIC DEFAULT 0,
   signature TEXT,
   "rejectionReason" TEXT,
   "principalPaymentCount" INTEGER DEFAULT 0,
   "extensionCount" INTEGER DEFAULT 0,
+  "payosOrderCode" TEXT,
+  "payosCheckoutUrl" TEXT,
+  "payosAmount" NUMERIC,
+  "payosExpireAt" BIGINT,
   "updatedAt" BIGINT
 );
 
@@ -145,7 +154,42 @@ INSERT INTO config (key, value) VALUES
 ('rankProfit', '0'),
 ('loanProfit', '0'),
 ('monthlyStats', '[]')
-ON CONFLICT (key) DO NOTHING;`;
+ON CONFLICT (key) DO NOTHING;
+
+-- Add missing columns to existing tables (if they don't exist)
+DO $$ 
+BEGIN 
+    -- Users table columns
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='payosOrderCode') THEN
+        ALTER TABLE users ADD COLUMN "payosOrderCode" TEXT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='payosCheckoutUrl') THEN
+        ALTER TABLE users ADD COLUMN "payosCheckoutUrl" TEXT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='payosAmount') THEN
+        ALTER TABLE users ADD COLUMN "payosAmount" NUMERIC;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='payosExpireAt') THEN
+        ALTER TABLE users ADD COLUMN "payosExpireAt" BIGINT;
+    END IF;
+
+    -- Loans table columns
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='loans' AND column_name='payosOrderCode') THEN
+        ALTER TABLE loans ADD COLUMN "payosOrderCode" TEXT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='loans' AND column_name='payosCheckoutUrl') THEN
+        ALTER TABLE loans ADD COLUMN "payosCheckoutUrl" TEXT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='loans' AND column_name='payosAmount') THEN
+        ALTER TABLE loans ADD COLUMN "payosAmount" NUMERIC;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='loans' AND column_name='payosExpireAt') THEN
+        ALTER TABLE loans ADD COLUMN "payosExpireAt" BIGINT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='loans' AND column_name='partialAmount') THEN
+        ALTER TABLE loans ADD COLUMN "partialAmount" NUMERIC DEFAULT 0;
+    END IF;
+END $$;`;
   
   const formatNumberWithDots = (val: string | number) => {
     if (val === undefined || val === null || val === '') return '';

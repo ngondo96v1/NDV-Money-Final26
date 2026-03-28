@@ -61,8 +61,8 @@ export const generateContractId = (userId: string, format = 'HD-{RANDOM}'): stri
   const userPart = userId.slice(-4).toUpperCase();
   
   return format
-    .replace('{RANDOM}', randomPart)
-    .replace('{USER}', userPart);
+    .replace(/\{RANDOM\}|\{RANDOM 4 SỐ\}|\{MÃ NGẪU NHIÊN\}|\{Mã Hợp Đồng\}/gi, randomPart)
+    .replace(/\{USER\}|\{MÃ USER\}|\{NGƯỜI DÙNG\}/gi, userPart);
 };
 
 /**
@@ -72,7 +72,7 @@ export const generateContractId = (userId: string, format = 'HD-{RANDOM}'): stri
 export const generateUserId = (format = 'US-{RANDOM}'): string => {
   const randomPart = Math.floor(1000 + Math.random() * 9000).toString();
   
-  return format.replace('{RANDOM}', randomPart);
+  return format.replace(/\{RANDOM\}|\{RANDOM 4 SỐ\}|\{MÃ NGẪU NHIÊN\}/gi, randomPart);
 };
 
 /**
