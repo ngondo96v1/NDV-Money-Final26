@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { User, LoanRecord, AppSettings } from '../types';
-import { Wallet, X, Eye, FileText, CheckCircle2, ShieldCheck, Eraser, ChevronLeft, CreditCard, Copy, Camera, UploadCloud, CircleHelp, Info, Award, Landmark, FileCheck, AlertCircle, AlertTriangle, ArrowDownToLine, ShieldAlert, ChevronRight, History, Calendar, Scale } from 'lucide-react';
+import { Wallet, X, Eye, FileText, CheckCircle2, ShieldCheck, Eraser, ChevronLeft, CreditCard, Copy, Camera, UploadCloud, CircleHelp, Info, Award, Landmark, FileCheck, AlertCircle, AlertTriangle, ArrowDownToLine, ShieldAlert, ChevronRight, History, Calendar, Scale, Check } from 'lucide-react';
 import ContractModal from './ContractModal';
 import { compressImage, generateContractId, uploadToImgBB } from '../utils';
 import { BANK_BINS } from '../constants';
@@ -12,6 +12,7 @@ interface LoanApplicationProps {
   isGlobalProcessing: boolean;
   onApplyLoan: (amount: number, signature?: string) => Promise<void> | void;
   onSettleLoan: (loanId: string, bill: string, settlementType: 'ALL' | 'PRINCIPAL' | 'PARTIAL', bankTransactionId?: string, partialAmount?: number) => Promise<void> | void;
+  onPayOSPayment: (type: 'SETTLE' | 'UPGRADE', id: string, amount: number, targetRank?: string) => Promise<void> | void;
   onBack: () => void;
   initialLoanToSettle?: LoanRecord | null;
   initialLoanToView?: LoanRecord | null;
@@ -171,10 +172,11 @@ const SignaturePad: React.FC<{ onSign: (signature: string | null) => void }> = (
   );
 };
 
-const LoanApplication: React.FC<LoanApplicationProps> = ({ user, loans, systemBudget, isGlobalProcessing, onApplyLoan, onSettleLoan, onBack, initialLoanToSettle, initialLoanToView, settings }) => {
+const LoanApplication: React.FC<LoanApplicationProps> = ({ user, loans, systemBudget, isGlobalProcessing, onApplyLoan, onSettleLoan, onPayOSPayment, onBack, initialLoanToSettle, initialLoanToView, settings }) => {
   const [step, setStep] = useState<LoanStep>(initialLoanToSettle ? LoanStep.SETTLE_DETAIL : LoanStep.LIST);
   const [selectedAmount, setSelectedAmount] = useState<number>(1000000);
   const [signatureData, setSignatureData] = useState<string | null>(null);
+  const [payMethod, setPayMethod] = useState<'AUTO' | 'MANUAL'>('AUTO');
   const [selectedContract, setSelectedContract] = useState<LoanRecord | null>(initialLoanToView || null);
   const [settleType, setSettleType] = useState<'ALL' | 'PRINCIPAL' | 'PARTIAL'>('ALL');
   const [partialAmount, setPartialAmount] = useState<number>(1000000);
@@ -825,33 +827,9 @@ const LoanApplication: React.FC<LoanApplicationProps> = ({ user, loans, systemBu
                   </p>
                 </div>
               )}
-              <div className="flex bg-black/40 p-1 rounded-xl border border-white/5">
-                {[
-                  { id: 'ALL', label: 'Tất toán', icon: <Scale size={12} /> },
-                  { id: 'PARTIAL', label: '1 Phần', icon: <Award size={12} /> },
-                  { id: 'PRINCIPAL', label: `Gia hạn (${extensionCount}/${settings.MAX_EXTENSIONS})`, icon: <ShieldCheck size={12} /> }
-                ].map((type) => {
-                  const isDisabled = type.id === 'PRINCIPAL' && !canSettlePrincipal;
-                  return (
-                    <button
-                      key={type.id}
-                      disabled={isDisabled}
-                      onClick={() => setSettleType(type.id as any)}
-                      className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg transition-all ${
-                        settleType === type.id 
-                          ? 'bg-[#ff8c00] text-black font-black shadow-lg shadow-orange-500/20' 
-                          : isDisabled ? 'opacity-20 cursor-not-allowed' : 'text-gray-500 hover:text-white'
-                      }`}
-                    >
-                      {type.icon}
-                      <span className="text-[8px] font-black uppercase tracking-widest">{type.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
             </div>
 
-            <div className="flex-1 min-h-0 space-y-1.5 flex flex-col">
+            <div className="flex-1 min-h-0 flex flex-col space-y-4">
               {showHelp ? (
                 <div className="h-full bg-[#ff8c00]/5 border border-[#ff8c00]/20 rounded-2xl p-5 animate-in fade-in zoom-in duration-300 space-y-5 overflow-y-auto">
                    <div className="flex items-center gap-3">
@@ -860,10 +838,11 @@ const LoanApplication: React.FC<LoanApplicationProps> = ({ user, loans, systemBu
                    </div>
                    <div className="space-y-4">
                       {[
-                        "Lựa chọn hình thức: Tất toán toàn bộ (TT), Tất toán một phần (TTMP) hoặc Gia hạn (GH).",
-                        "Thanh toán: Quét mã QR và kiểm tra kỹ số tiền cũng như nội dung chuyển khoản trước khi xác nhận.",
-                        "Minh chứng: Chụp ảnh Biên lai (Bill) giao dịch rõ nét, hiển thị đầy đủ mã giao dịch và thời gian.",
-                        "Xác nhận: Tải ảnh Bill lên hệ thống để bộ phận đối soát kiểm tra và cập nhật trạng thái khoản vay."
+                        "Bước 1: Chọn hình thức thanh toán (Tự động hoặc Thủ công).",
+                        "Bước 2: Chọn loại tất toán (Toàn bộ, Một phần hoặc Gia hạn).",
+                        "Thanh toán: Lựa chọn 'Tự động' để thanh toán nhanh qua PayOS hoặc 'Thủ công' để chuyển khoản ngân hàng.",
+                        "Minh chứng: Nếu chọn 'Thủ công', hãy chụp ảnh Biên lai (Bill) giao dịch rõ nét.",
+                        "Xác nhận: Nhấn nút xác nhận ở cuối trang để hoàn tất giao dịch."
                       ].map((text, idx) => (
                         <div key={idx} className="flex gap-3">
                           <div className="w-6 h-6 bg-[#ff8c00] rounded-full flex items-center justify-center shrink-0 font-black text-[12px] text-black">{idx + 1}</div>
@@ -873,129 +852,276 @@ const LoanApplication: React.FC<LoanApplicationProps> = ({ user, loans, systemBu
                    </div>
                 </div>
               ) : (
-                <div className="flex-1 flex flex-col space-y-3 overflow-hidden">
-                    {/* Partial Amount Slider - Merged into the same frame */}
-                    {settleType === 'PARTIAL' && (
-                      <div className="space-y-2.5 pb-2 border-b border-white/5">
-                        <div className="flex items-center justify-between px-1">
-                          <span className="text-[8px] font-black text-gray-400 uppercase tracking-widest">Số tiền gốc trả</span>
-                          <span className="text-[10px] font-black text-[#ff8c00]">{partialAmount.toLocaleString()} đ</span>
+                <div className="flex-1 flex flex-col space-y-4 overflow-hidden">
+                    {/* STEP 1: Payment Method Selection */}
+                    <div className="space-y-3 shrink-0">
+                      <div className="flex items-center justify-between px-1">
+                        <div className="flex items-center gap-2">
+                          <div className="w-1 h-3 bg-[#ff8c00] rounded-full"></div>
+                          <h4 className="text-[10px] font-black text-white uppercase tracking-widest">Phương thức thanh toán</h4>
                         </div>
-                        <div className="px-1">
-                          <input
-                            type="range"
-                            min="1000000"
-                            max={Math.max(1000000, Math.min(9000000, settleLoan.amount - 1000000))}
-                            step="1000000"
-                            value={partialAmount}
-                            onChange={(e) => {
-                              setPartialAmount(parseInt(e.target.value));
-                              setQrLoading(true);
-                            }}
-                            className="w-full h-1 bg-gray-800 rounded-full appearance-none cursor-pointer accent-[#ff8c00] focus:outline-none"
-                          />
-                        </div>
+                        <span className="text-[8px] font-bold text-gray-500 uppercase tracking-tighter">BƯỚC 1/3</span>
                       </div>
-                    )}
+                      <div className="grid grid-cols-2 gap-2">
+                        <button 
+                          onClick={() => setPayMethod('AUTO')}
+                          className={`relative overflow-hidden py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex flex-col items-center justify-center gap-1 border ${
+                            payMethod === 'AUTO' 
+                              ? 'bg-[#ff8c00] text-black border-[#ff8c00] shadow-lg shadow-orange-500/20' 
+                              : 'bg-white/5 text-gray-500 border-white/5 hover:border-white/10'
+                          }`}
+                        >
+                          <ShieldCheck size={14} className={payMethod === 'AUTO' ? 'text-black' : 'text-gray-600'} />
+                          Tự động (PayOS)
+                          {payMethod === 'AUTO' && <div className="absolute top-0 right-0 w-5 h-5 bg-black/10 rounded-bl-full flex items-center justify-center"><Check size={8} /></div>}
+                        </button>
+                        <button 
+                          onClick={() => setPayMethod('MANUAL')}
+                          className={`relative overflow-hidden py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex flex-col items-center justify-center gap-1 border ${
+                            payMethod === 'MANUAL' 
+                              ? 'bg-[#ff8c00] text-black border-[#ff8c00] shadow-lg shadow-orange-500/20' 
+                              : 'bg-white/5 text-gray-500 border-white/5 hover:border-white/10'
+                          }`}
+                        >
+                          <Landmark size={14} className={payMethod === 'MANUAL' ? 'text-black' : 'text-gray-600'} />
+                          Thủ công (Bank)
+                          {payMethod === 'MANUAL' && <div className="absolute top-0 right-0 w-5 h-5 bg-black/10 rounded-bl-full flex items-center justify-center"><Check size={8} /></div>}
+                        </button>
+                      </div>
+                    </div>
 
-                    {/* QR & Bank Info Part */}
-                      <div className="space-y-4 flex-1 flex flex-col justify-center py-2">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1.5">
-                            <Landmark size={16} className="text-[#ff8c00]" />
-                            <h3 className="text-[10px] font-black uppercase tracking-widest text-white">Thông tin thanh toán</h3>
+                    {/* STEP 2: Settlement Type Selection */}
+                    <div className="space-y-3 shrink-0">
+                      <div className="flex items-center justify-between px-1">
+                        <div className="flex items-center gap-2">
+                          <div className="w-1 h-3 bg-[#ff8c00] rounded-full"></div>
+                          <h4 className="text-[10px] font-black text-white uppercase tracking-widest">Hình thức tất toán</h4>
+                        </div>
+                        <span className="text-[8px] font-bold text-gray-500 uppercase tracking-tighter">BƯỚC 2/3</span>
+                      </div>
+                      <div className="flex bg-black/60 p-1 rounded-2xl border border-white/5 gap-1">
+                        {[
+                          { id: 'ALL', label: 'Tất toán', icon: <Scale size={12} /> },
+                          { id: 'PARTIAL', label: 'TTMP', icon: <Award size={12} /> },
+                          { id: 'PRINCIPAL', label: `Gia hạn`, icon: <ShieldCheck size={12} />, sub: `(${extensionCount}/${settings.MAX_EXTENSIONS})` }
+                        ].map((type) => {
+                          const isDisabled = type.id === 'PRINCIPAL' && !canSettlePrincipal;
+                          const isActive = settleType === type.id;
+                          return (
+                            <button
+                              key={type.id}
+                              disabled={isDisabled}
+                              onClick={() => {
+                                setSettleType(type.id as any);
+                                setQrLoading(true);
+                              }}
+                              className={`flex-1 flex flex-col items-center justify-center py-1.5 rounded-xl transition-all border ${
+                                isActive 
+                                  ? 'bg-white/10 text-[#ff8c00] font-black border-[#ff8c00]/40 shadow-inner' 
+                                  : isDisabled ? 'opacity-20 cursor-not-allowed border-transparent' : 'text-gray-500 hover:text-white border-transparent'
+                              }`}
+                            >
+                              {type.icon}
+                              <span className="text-[7px] font-black uppercase tracking-widest mt-0.5">{type.label}</span>
+                              {type.sub && <span className="text-[5px] font-bold opacity-60">{type.sub}</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* STEP 3: Payment Details */}
+                    <div className="flex-1 overflow-y-auto pr-1 custom-scrollbar">
+                      <div className="space-y-4 pb-4">
+                        <div className="flex items-center justify-between px-1">
+                          <div className="flex items-center gap-2">
+                            <div className="w-1 h-3 bg-[#ff8c00] rounded-full"></div>
+                            <h4 className="text-[10px] font-black text-white uppercase tracking-widest">Chi tiết thanh toán</h4>
                           </div>
-                          <div className="flex items-center gap-1">
-                            <div className="w-1 h-1 bg-green-500 rounded-full animate-pulse"></div>
-                            <span className="text-[7px] font-black text-green-500 uppercase">Hệ thống tự động</span>
-                          </div>
+                          <span className="text-[8px] font-bold text-gray-500 uppercase tracking-tighter">BƯỚC 3/3</span>
                         </div>
 
-                        <div className="flex gap-4 items-center">
-                          <div className="flex flex-col items-center gap-2 shrink-0">
-                            <div className="w-40 h-40 bg-white rounded-2xl p-2 shadow-inner relative overflow-hidden">
-                              <img 
-                                src={qrUrl} 
-                                alt="VietQR" 
-                                className={`w-full h-full object-contain transition-opacity duration-300 ${qrLoading ? 'opacity-0' : 'opacity-100'}`} 
-                                onLoad={() => setQrLoading(false)}
-                              />
-                              {qrLoading && (
-                                <div className="absolute inset-0 flex items-center justify-center bg-white/80 backdrop-blur-sm">
-                                  <div className="w-6 h-6 border-2 border-[#ff8c00] border-t-transparent rounded-full animate-spin"></div>
+                        {payMethod === 'AUTO' ? (
+                          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                            <div className="bg-[#ff8c00]/5 border border-[#ff8c00]/20 rounded-2xl p-5 space-y-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-[#ff8c00]/10 rounded-full flex items-center justify-center text-[#ff8c00]">
+                                  <ShieldCheck size={20} />
+                                </div>
+                                <div>
+                                  <h3 className="text-[12px] font-black text-white uppercase tracking-wider">Cổng thanh toán PayOS</h3>
+                                  <p className="text-[9px] font-bold text-[#ff8c00]/60 uppercase tracking-widest">Duyệt tự động • An toàn • 24/7</p>
+                                </div>
+                              </div>
+                              
+                              <div className="space-y-3">
+                                <div className="flex items-center gap-2 text-[10px] font-bold text-gray-400">
+                                  <div className="w-1.5 h-1.5 bg-[#ff8c00] rounded-full"></div>
+                                  <span>Hệ thống tự động cập nhật ngay sau khi thanh toán</span>
+                                </div>
+                                <div className="flex items-center gap-2 text-[10px] font-bold text-gray-400">
+                                  <div className="w-1.5 h-1.5 bg-[#ff8c00] rounded-full"></div>
+                                  <span>Hỗ trợ thanh toán qua mã QR của mọi ngân hàng</span>
+                                </div>
+                              </div>
+
+                              {settleType === 'PARTIAL' && (
+                                <div className="bg-black/40 p-4 rounded-xl border border-white/5 space-y-3">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Số tiền gốc trả</span>
+                                    <span className="text-[12px] font-black text-[#ff8c00]">{partialAmount.toLocaleString()} đ</span>
+                                  </div>
+                                  <input
+                                    type="range"
+                                    min="1000000"
+                                    max={Math.max(1000000, Math.min(9000000, settleLoan.amount - 1000000))}
+                                    step="1000000"
+                                    value={partialAmount}
+                                    onChange={(e) => {
+                                      setPartialAmount(parseInt(e.target.value));
+                                    }}
+                                    className="w-full h-1.5 bg-gray-800 rounded-full appearance-none cursor-pointer accent-[#ff8c00] focus:outline-none"
+                                  />
                                 </div>
                               )}
-                            </div>
-                            <button 
-                              onClick={() => handleDownloadQR(qrUrl)}
-                              className="flex items-center gap-1.5 px-4 py-2 bg-white/5 rounded-xl border border-white/10 active:bg-white/10 transition-all w-full justify-center"
-                            >
-                              <ArrowDownToLine size={14} className="text-[#ff8c00]" />
-                              <span className="text-[8px] font-black text-gray-400 uppercase">Lưu QR</span>
-                            </button>
-                          </div>
 
-                          <div className="flex-1 space-y-2">
-                            {[
-                              { label: 'Ngân hàng', value: settings.PAYMENT_ACCOUNT.bankName, copy: false },
-                              { label: 'Số tài khoản', value: settings.PAYMENT_ACCOUNT.accountNumber, copy: true },
-                              { label: 'Chủ tài khoản', value: settings.PAYMENT_ACCOUNT.accountName, copy: false },
-                              { label: 'Số tiền', value: `${currentAmount.toLocaleString()} đ`, copy: true, rawValue: currentAmount.toString() },
-                              { label: 'Nội dung', value: content, copy: true, highlight: true }
-                            ].map((item, i) => (
-                              <div 
-                                key={i} 
-                                onClick={() => item.copy && copyToClipboard(item.rawValue || item.value)}
-                                className={`bg-black/40 p-2.5 rounded-xl border border-white/5 flex items-center justify-between group transition-all ${item.copy ? 'active:bg-black/60 cursor-pointer' : ''}`}
-                              >
-                                <div className="min-w-0 flex-1">
-                                  <p className="text-[7px] font-bold text-gray-500 uppercase leading-none mb-1.5">{item.label}</p>
-                                  <p className={`text-[11px] font-black leading-none truncate ${item.highlight ? 'text-[#ff8c00]' : 'text-white'}`}>{item.value}</p>
+                              <div className="pt-2">
+                                <div className="bg-black/40 p-4 rounded-xl border border-white/5 flex items-center justify-between">
+                                  <span className="text-[10px] font-black text-gray-500 uppercase">Số tiền cần trả</span>
+                                  <span className="text-[18px] font-black text-[#ff8c00]">{currentAmount.toLocaleString()} đ</span>
                                 </div>
-                                {item.copy && <Copy size={12} className="text-[#ff8c00] opacity-40 group-hover:opacity-100 transition-all shrink-0 ml-2" />}
                               </div>
-                            ))}
+                            </div>
                           </div>
-                        </div>
-                      </div>
-
-                    <div className="h-px bg-white/5 w-full"></div>
-
-                    {/* Verification Part */}
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5">
-                          <Camera size={14} className="text-[#ff8c00]" />
-                          <h3 className="text-[9px] font-black uppercase tracking-widest text-white">Xác nhận giao dịch</h3>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 gap-3">
-                        <div className="space-y-1.5">
-                          <p className="text-[7px] font-black text-gray-500 uppercase tracking-widest ml-1">Biên lai chuyển khoản</p>
-                          <div 
-                            onClick={() => document.getElementById('billInputSettle')?.click()}
-                            className={`h-[100px] rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-2 cursor-pointer relative overflow-hidden transition-all ${billImage ? 'border-green-500 bg-green-500/5' : 'border-white/5 bg-black hover:border-[#ff8c00]/30'}`}
-                          >
-                            <input id="billInputSettle" type="file" accept="image/*" hidden onChange={handleBillUpload} />
-                            {billImage ? (
-                              <>
-                                <img src={billImage} className="absolute inset-0 w-full h-full object-cover opacity-20" />
-                                <CheckCircle2 size={24} className="text-green-500 relative z-10" />
-                                <span className="text-[8px] font-black text-green-500 uppercase relative z-10">Đã tải biên lai</span>
-                              </>
-                            ) : (
-                              <>
-                                {isUploading ? (
-                                  <div className="animate-spin border-2 border-[#ff8c00] border-t-transparent w-6 h-6 rounded-full" />
-                                ) : (
-                                  <UploadCloud size={24} className="text-gray-600" />
-                                )}
-                                <span className="text-[8px] font-black text-gray-600 uppercase">Tải lên biên lai</span>
-                              </>
+                        ) : (
+                          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                            {/* Partial Amount Slider */}
+                            {settleType === 'PARTIAL' && (
+                              <div className="bg-white/5 p-4 rounded-2xl border border-white/5 space-y-3">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Số tiền gốc trả</span>
+                                  <span className="text-[12px] font-black text-[#ff8c00]">{partialAmount.toLocaleString()} đ</span>
+                                </div>
+                                <input
+                                  type="range"
+                                  min="1000000"
+                                  max={Math.max(1000000, Math.min(9000000, settleLoan.amount - 1000000))}
+                                  step="1000000"
+                                  value={partialAmount}
+                                  onChange={(e) => {
+                                    setPartialAmount(parseInt(e.target.value));
+                                    setQrLoading(true);
+                                  }}
+                                  className="w-full h-1.5 bg-gray-800 rounded-full appearance-none cursor-pointer accent-[#ff8c00] focus:outline-none"
+                                />
+                                <p className="text-[8px] font-bold text-gray-500 italic text-center">Kéo để điều chỉnh số tiền muốn trả trước</p>
+                              </div>
                             )}
+
+                            {/* Bank Info Card */}
+                            <div className="bg-white/5 rounded-2xl border border-white/5 overflow-hidden">
+                              <div className="bg-white/5 p-3 border-b border-white/5 flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <Landmark size={14} className="text-[#ff8c00]" />
+                                  <span className="text-[9px] font-black text-white uppercase tracking-widest">Thông tin chuyển khoản</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <div className="w-1 h-1 bg-amber-500 rounded-full animate-pulse"></div>
+                                  <span className="text-[7px] font-black text-amber-500 uppercase">Duyệt thủ công</span>
+                                </div>
+                              </div>
+                              
+                              <div className="p-4 space-y-4">
+                                <div className="flex gap-4 items-center">
+                                  <div className="flex flex-col items-center gap-2 shrink-0">
+                                    <div className="w-32 h-32 bg-white rounded-xl p-2 shadow-inner relative overflow-hidden">
+                                      <img 
+                                        src={qrUrl} 
+                                        alt="VietQR" 
+                                        className={`w-full h-full object-contain transition-opacity duration-300 ${qrLoading ? 'opacity-0' : 'opacity-100'}`} 
+                                        onLoad={() => setQrLoading(false)}
+                                        onError={() => setQrLoading(false)}
+                                      />
+                                      {qrLoading && (
+                                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm">
+                                          <div className="w-5 h-5 border-2 border-[#ff8c00] border-t-transparent rounded-full animate-spin mb-2"></div>
+                                          <span className="text-[6px] font-black text-[#ff8c00] uppercase animate-pulse">Đang tải mã QR...</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                    <button 
+                                      onClick={() => handleDownloadQR(qrUrl)}
+                                      className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 rounded-lg border border-white/10 active:bg-white/10 transition-all w-full justify-center"
+                                    >
+                                      <ArrowDownToLine size={12} className="text-[#ff8c00]" />
+                                      <span className="text-[7px] font-black text-gray-400 uppercase">Lưu mã QR</span>
+                                    </button>
+                                  </div>
+
+                                  <div className="flex-1 space-y-1.5">
+                                    {[
+                                      { label: 'Ngân hàng', value: settings.PAYMENT_ACCOUNT.bankName, copy: false },
+                                      { label: 'Số tài khoản', value: settings.PAYMENT_ACCOUNT.accountNumber, copy: true },
+                                      { label: 'Số tiền', value: `${currentAmount.toLocaleString()} đ`, copy: true, rawValue: currentAmount.toString() },
+                                      { label: 'Nội dung', value: content, copy: true, highlight: true }
+                                    ].map((item, i) => (
+                                      <div 
+                                        key={i} 
+                                        onClick={() => item.copy && copyToClipboard(item.rawValue || item.value)}
+                                        className={`bg-black/40 p-2 rounded-lg border border-white/5 flex items-center justify-between group transition-all ${item.copy ? 'active:bg-black/60 cursor-pointer' : ''}`}
+                                      >
+                                        <div className="min-w-0 flex-1">
+                                          <p className="text-[6px] font-bold text-gray-500 uppercase leading-none mb-1">{item.label}</p>
+                                          <p className={`text-[10px] font-black leading-none truncate ${item.highlight ? 'text-[#ff8c00]' : 'text-white'}`}>{item.value}</p>
+                                        </div>
+                                        {item.copy && <Copy size={10} className="text-[#ff8c00] opacity-40 group-hover:opacity-100 transition-all shrink-0 ml-2" />}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Verification Part */}
+                            <div className="space-y-3">
+                              <div className="flex items-center gap-2 px-1">
+                                <Camera size={14} className="text-[#ff8c00]" />
+                                <h3 className="text-[9px] font-black uppercase tracking-widest text-white">Xác nhận giao dịch</h3>
+                              </div>
+
+                              <div 
+                                onClick={() => document.getElementById('billInputSettle')?.click()}
+                                className={`h-[120px] rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-2 cursor-pointer relative overflow-hidden transition-all ${billImage ? 'border-green-500 bg-green-500/5' : 'border-white/10 bg-white/5 hover:border-[#ff8c00]/30'}`}
+                              >
+                                <input id="billInputSettle" type="file" accept="image/*" hidden onChange={handleBillUpload} />
+                                {billImage ? (
+                                  <>
+                                    <img src={billImage} className="absolute inset-0 w-full h-full object-cover opacity-30" />
+                                    <div className="relative z-10 flex flex-col items-center gap-2">
+                                      <div className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center shadow-lg shadow-green-500/20">
+                                        <CheckCircle2 size={20} className="text-white" />
+                                      </div>
+                                      <span className="text-[9px] font-black text-green-500 uppercase tracking-widest">Biên lai đã sẵn sàng</span>
+                                    </div>
+                                  </>
+                                ) : (
+                                  <>
+                                    {isUploading ? (
+                                      <div className="animate-spin border-2 border-[#ff8c00] border-t-transparent w-8 h-8 rounded-full" />
+                                    ) : (
+                                      <div className="flex flex-col items-center gap-2">
+                                        <div className="w-10 h-10 bg-white/5 rounded-full flex items-center justify-center border border-white/10">
+                                          <UploadCloud size={20} className="text-gray-400" />
+                                        </div>
+                                        <span className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Tải lên biên lai giao dịch</span>
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                        </div>
+                        )}
                       </div>
                     </div>
                 </div>
@@ -1005,15 +1131,25 @@ const LoanApplication: React.FC<LoanApplicationProps> = ({ user, loans, systemBu
         </div>
 
         <div className="sticky bottom-0 left-0 right-0 p-3 bg-black flex gap-2 z-[110] border-t border-white/5 mt-auto">
-          <button
-            disabled={!billImage || isSubmitting || isGlobalProcessing}
-            onClick={handleConfirmSettlement}
-            className={`w-full py-3.5 rounded-xl font-black text-[10px] uppercase tracking-[0.15em] transition-all shadow-xl active:scale-95 ${
-              billImage && !isSubmitting && !isGlobalProcessing ? 'bg-[#ff8c00] text-black shadow-orange-950/20' : 'bg-white/5 text-gray-600 cursor-not-allowed opacity-50'
-            }`}
-          >
-            {isSubmitting || isGlobalProcessing ? 'ĐANG XỬ LÝ...' : (billImage ? 'GỬI XÉT DUYỆT NGAY' : 'VUI LÒNG ĐÍNH KÈM BILL')}
-          </button>
+          {payMethod === 'AUTO' ? (
+            <button
+              onClick={() => onPayOSPayment('SETTLE', settleLoan.id, currentAmount, undefined, settleType, settleType === 'PARTIAL' ? partialAmount : undefined)}
+              disabled={isSubmitting || isGlobalProcessing}
+              className={`w-full py-3.5 rounded-xl font-black text-[10px] uppercase tracking-[0.15em] transition-all shadow-xl active:scale-95 bg-[#ff8c00] text-black shadow-orange-950/20`}
+            >
+              {isSubmitting || isGlobalProcessing ? 'ĐANG XỬ LÝ...' : 'THANH TOÁN PAYOS NGAY'}
+            </button>
+          ) : (
+            <button
+              disabled={!billImage || isSubmitting || isGlobalProcessing || qrLoading}
+              onClick={handleConfirmSettlement}
+              className={`w-full py-3.5 rounded-xl font-black text-[10px] uppercase tracking-[0.15em] transition-all shadow-xl active:scale-95 ${
+                billImage && !isSubmitting && !isGlobalProcessing && !qrLoading ? 'bg-[#ff8c00] text-black shadow-orange-950/20' : 'bg-white/5 text-gray-600 cursor-not-allowed opacity-50'
+              }`}
+            >
+              {isSubmitting || isGlobalProcessing ? 'ĐANG XỬ LÝ...' : (qrLoading ? 'ĐANG TẢI MÃ QR...' : (billImage ? 'GỬI XÉT DUYỆT' : 'ĐÍNH KÈM BILL'))}
+            </button>
+          )}
         </div>
       </div>
     );

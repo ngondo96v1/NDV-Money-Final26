@@ -1,6 +1,26 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Database, Settings, AlertCircle, RefreshCw, X, Check, Download, Upload, Loader2, Search, Copy, ChevronDown, ChevronUp } from 'lucide-react';
+import { 
+  Database, 
+  Settings, 
+  RefreshCw, 
+  Check, 
+  Copy, 
+  ChevronDown, 
+  ChevronUp, 
+  User, 
+  Shield, 
+  CreditCard, 
+  Wrench, 
+  AlertCircle, 
+  Loader2, 
+  X, 
+  Hash,
+  TrendingUp,
+  Download,
+  Upload,
+  Search
+} from 'lucide-react';
 import BankSearchableSelect from './BankSearchableSelect';
 
 interface AdminSystemProps {
@@ -23,18 +43,25 @@ const AdminSystem: React.FC<AdminSystemProps> = ({ onReset, onImportSuccess, onB
   const [settingsMessage, setSettingsMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
-    supabase: false,
-    imgbb: false,
-    payos: false,
+    connection: true,
     admin: false,
-    tools: false,
+    formats: false,
     payment: false,
-    fees: false
+    fees: false,
+    tools: false
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const toggleSection = (section: string) => {
-    setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
+    setExpandedSections(prev => {
+      const isCurrentlyExpanded = prev[section];
+      const newState: Record<string, boolean> = {};
+      Object.keys(prev).forEach(key => {
+        newState[key] = false;
+      });
+      newState[section] = !isCurrentlyExpanded;
+      return newState;
+    });
   };
 
   const copyToClipboard = (text: string, field: string) => {
@@ -146,10 +173,15 @@ ON CONFLICT (key) DO NOTHING;`;
     PAYOS_CLIENT_ID: '',
     PAYOS_API_KEY: '',
     PAYOS_CHECKSUM_KEY: '',
-    APP_URL: '',
     JWT_SECRET: '',
     ADMIN_PHONE: '',
-    ADMIN_PASSWORD: ''
+    ADMIN_PASSWORD: '',
+    PAYMENT_CONTENT_FULL_SETTLEMENT: 'TAT TOAN TAT CA',
+    PAYMENT_CONTENT_PARTIAL_SETTLEMENT: 'TAT TOAN 1 PHAN',
+    PAYMENT_CONTENT_EXTENSION: 'GIA HAN',
+    PAYMENT_CONTENT_UPGRADE: 'NANG HANG',
+    CONTRACT_CODE_FORMAT: 'HD-{RANDOM}',
+    USER_ID_FORMAT: 'US-{RANDOM}'
   };
 
   const [localSettings, setLocalSettings] = useState<any>(() => {
@@ -229,9 +261,6 @@ ON CONFLICT (key) DO NOTHING;`;
       if (localSettings.PAYOS_CHECKSUM_KEY !== settings?.PAYOS_CHECKSUM_KEY)
         changedSettings.PAYOS_CHECKSUM_KEY = localSettings.PAYOS_CHECKSUM_KEY;
 
-      if (localSettings.APP_URL !== settings?.APP_URL)
-        changedSettings.APP_URL = localSettings.APP_URL;
-
       if (localSettings.JWT_SECRET !== settings?.JWT_SECRET)
         changedSettings.JWT_SECRET = localSettings.JWT_SECRET;
 
@@ -240,6 +269,24 @@ ON CONFLICT (key) DO NOTHING;`;
 
       if (localSettings.ADMIN_PASSWORD !== settings?.ADMIN_PASSWORD)
         changedSettings.ADMIN_PASSWORD = localSettings.ADMIN_PASSWORD;
+
+      if (localSettings.PAYMENT_CONTENT_FULL_SETTLEMENT !== settings?.PAYMENT_CONTENT_FULL_SETTLEMENT)
+        changedSettings.PAYMENT_CONTENT_FULL_SETTLEMENT = localSettings.PAYMENT_CONTENT_FULL_SETTLEMENT;
+
+      if (localSettings.PAYMENT_CONTENT_PARTIAL_SETTLEMENT !== settings?.PAYMENT_CONTENT_PARTIAL_SETTLEMENT)
+        changedSettings.PAYMENT_CONTENT_PARTIAL_SETTLEMENT = localSettings.PAYMENT_CONTENT_PARTIAL_SETTLEMENT;
+
+      if (localSettings.PAYMENT_CONTENT_EXTENSION !== settings?.PAYMENT_CONTENT_EXTENSION)
+        changedSettings.PAYMENT_CONTENT_EXTENSION = localSettings.PAYMENT_CONTENT_EXTENSION;
+
+      if (localSettings.PAYMENT_CONTENT_UPGRADE !== settings?.PAYMENT_CONTENT_UPGRADE)
+        changedSettings.PAYMENT_CONTENT_UPGRADE = localSettings.PAYMENT_CONTENT_UPGRADE;
+
+      if (localSettings.CONTRACT_CODE_FORMAT !== settings?.CONTRACT_CODE_FORMAT)
+        changedSettings.CONTRACT_CODE_FORMAT = localSettings.CONTRACT_CODE_FORMAT;
+
+      if (localSettings.USER_ID_FORMAT !== settings?.USER_ID_FORMAT)
+        changedSettings.USER_ID_FORMAT = localSettings.USER_ID_FORMAT;
 
       if (Object.keys(changedSettings).length === 0) {
         setSettingsMessage({ type: 'error', text: 'Không có thay đổi nào để lưu' });
@@ -513,120 +560,130 @@ ON CONFLICT (key) DO NOTHING;`;
           </div>
 
           <div className="space-y-6">
-            {/* Supabase Config */}
+            {/* Connection & Security Group */}
             <div className="space-y-4 pt-2 border-t border-white/5">
               <button 
-                onClick={() => toggleSection('supabase')}
+                onClick={() => toggleSection('connection')}
                 className="w-full flex items-center justify-between group"
               >
-                <h5 className="text-[8px] font-black text-[#ff8c00] uppercase tracking-widest">Cấu hình Supabase</h5>
-                {expandedSections.supabase ? <ChevronUp size={12} className="text-gray-500" /> : <ChevronDown size={12} className="text-gray-500" />}
+                <div className="flex items-center gap-3">
+                  <div className="w-6 h-6 rounded-lg bg-[#ff8c00]/10 flex items-center justify-center">
+                    <Shield size={12} className="text-[#ff8c00]" />
+                  </div>
+                  <h5 className="text-[8px] font-black text-[#ff8c00] uppercase tracking-widest">Kết nối & Bảo mật</h5>
+                </div>
+                {expandedSections.connection ? <ChevronUp size={12} className="text-gray-500" /> : <ChevronDown size={12} className="text-gray-500" />}
               </button>
               
-              {expandedSections.supabase && (
-                <div className="space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
-                  <div className="space-y-2">
-                    <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Supabase URL</label>
-                    <input 
-                      type="text" 
-                      value={localSettings.SUPABASE_URL || ''}
-                      onChange={(e) => setLocalSettings({...localSettings, SUPABASE_URL: e.target.value})}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
-                    />
+              {expandedSections.connection && (
+                <div className="space-y-6 pl-9 animate-in fade-in slide-in-from-top-1 duration-200">
+                  {/* Supabase */}
+                  <div className="space-y-4">
+                    <h6 className="text-[7px] font-black text-gray-500 uppercase tracking-[0.2em]">Supabase Cloud</h6>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Supabase URL</label>
+                        <input 
+                          type="text" 
+                          value={localSettings.SUPABASE_URL || ''}
+                          onChange={(e) => setLocalSettings({...localSettings, SUPABASE_URL: e.target.value})}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Service Role Key</label>
+                        <input 
+                          type="password" 
+                          value={localSettings.SUPABASE_SERVICE_ROLE_KEY || ''}
+                          onChange={(e) => setLocalSettings({...localSettings, SUPABASE_SERVICE_ROLE_KEY: e.target.value})}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
+                        />
+                      </div>
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Supabase Service Role Key</label>
-                    <input 
-                      type="password" 
-                      value={localSettings.SUPABASE_SERVICE_ROLE_KEY || ''}
-                      onChange={(e) => setLocalSettings({...localSettings, SUPABASE_SERVICE_ROLE_KEY: e.target.value})}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
 
-            {/* ImgBB Config */}
-            <div className="space-y-4 pt-4 border-t border-white/5">
-              <button 
-                onClick={() => toggleSection('imgbb')}
-                className="w-full flex items-center justify-between group"
-              >
-                <h5 className="text-[8px] font-black text-[#ff8c00] uppercase tracking-widest">Cấu hình ImgBB</h5>
-                {expandedSections.imgbb ? <ChevronUp size={12} className="text-gray-500" /> : <ChevronDown size={12} className="text-gray-500" />}
-              </button>
-
-              {expandedSections.imgbb && (
-                <div className="space-y-2 animate-in fade-in slide-in-from-top-1 duration-200">
-                  <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">ImgBB API Key</label>
-                  <input 
-                    type="text" 
-                    value={localSettings.IMGBB_API_KEY || ''}
-                    onChange={(e) => setLocalSettings({...localSettings, IMGBB_API_KEY: e.target.value})}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* PayOS Config */}
-            <div className="space-y-4 pt-4 border-t border-white/5">
-              <button 
-                onClick={() => toggleSection('payos')}
-                className="w-full flex items-center justify-between group"
-              >
-                <h5 className="text-[8px] font-black text-[#ff8c00] uppercase tracking-widest">Cấu hình PayOS</h5>
-                {expandedSections.payos ? <ChevronUp size={12} className="text-gray-500" /> : <ChevronDown size={12} className="text-gray-500" />}
-              </button>
-
-              {expandedSections.payos && (
-                <div className="space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* ImgBB */}
+                  <div className="space-y-4 pt-4 border-t border-white/5">
+                    <h6 className="text-[7px] font-black text-gray-500 uppercase tracking-[0.2em]">Lưu trữ hình ảnh (ImgBB)</h6>
                     <div className="space-y-2">
-                      <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">PayOS Client ID</label>
+                      <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">ImgBB API Key</label>
                       <input 
                         type="text" 
-                        value={localSettings.PAYOS_CLIENT_ID || ''}
-                        onChange={(e) => setLocalSettings({...localSettings, PAYOS_CLIENT_ID: e.target.value})}
-                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">PayOS API Key</label>
-                      <input 
-                        type="password" 
-                        value={localSettings.PAYOS_API_KEY || ''}
-                        onChange={(e) => setLocalSettings({...localSettings, PAYOS_API_KEY: e.target.value})}
+                        value={localSettings.IMGBB_API_KEY || ''}
+                        onChange={(e) => setLocalSettings({...localSettings, IMGBB_API_KEY: e.target.value})}
                         className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
                       />
                     </div>
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">PayOS Checksum Key</label>
-                    <input 
-                      type="password" 
-                      value={localSettings.PAYOS_CHECKSUM_KEY || ''}
-                      onChange={(e) => setLocalSettings({...localSettings, PAYOS_CHECKSUM_KEY: e.target.value})}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
-                    />
+
+                  {/* PayOS */}
+                  <div className="space-y-4 pt-4 border-t border-white/5">
+                    <h6 className="text-[7px] font-black text-gray-500 uppercase tracking-[0.2em]">Cổng thanh toán PayOS</h6>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Client ID</label>
+                        <input 
+                          type="text" 
+                          value={localSettings.PAYOS_CLIENT_ID || ''}
+                          onChange={(e) => setLocalSettings({...localSettings, PAYOS_CLIENT_ID: e.target.value})}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">API Key</label>
+                        <input 
+                          type="password" 
+                          value={localSettings.PAYOS_API_KEY || ''}
+                          onChange={(e) => setLocalSettings({...localSettings, PAYOS_API_KEY: e.target.value})}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Checksum Key</label>
+                      <input 
+                        type="password" 
+                        value={localSettings.PAYOS_CHECKSUM_KEY || ''}
+                        onChange={(e) => setLocalSettings({...localSettings, PAYOS_CHECKSUM_KEY: e.target.value})}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  {/* JWT Secret */}
+                  <div className="space-y-4 pt-4 border-t border-white/5">
+                    <h6 className="text-[7px] font-black text-gray-500 uppercase tracking-[0.2em]">Hệ thống & Bảo mật</h6>
+                    <div className="space-y-2">
+                      <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">JWT Secret Key</label>
+                      <input 
+                        type="password" 
+                        value={localSettings.JWT_SECRET || ''}
+                        onChange={(e) => setLocalSettings({...localSettings, JWT_SECRET: e.target.value})}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
+                      />
+                    </div>
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Admin Credentials & JWT */}
+            {/* Admin Account Group */}
             <div className="space-y-4 pt-4 border-t border-white/5">
               <button 
                 onClick={() => toggleSection('admin')}
                 className="w-full flex items-center justify-between group"
               >
-                <h5 className="text-[8px] font-black text-[#ff8c00] uppercase tracking-widest">Tài khoản Admin & Bảo mật</h5>
+                <div className="flex items-center gap-3">
+                  <div className="w-6 h-6 rounded-lg bg-[#ff8c00]/10 flex items-center justify-center">
+                    <User size={12} className="text-[#ff8c00]" />
+                  </div>
+                  <h5 className="text-[8px] font-black text-[#ff8c00] uppercase tracking-widest">Tài khoản Admin</h5>
+                </div>
                 {expandedSections.admin ? <ChevronUp size={12} className="text-gray-500" /> : <ChevronDown size={12} className="text-gray-500" />}
               </button>
 
               {expandedSections.admin && (
-                <div className="space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                <div className="space-y-4 pl-9 animate-in fade-in slide-in-from-top-1 duration-200">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Số điện thoại Admin</label>
@@ -647,31 +704,173 @@ ON CONFLICT (key) DO NOTHING;`;
                       />
                     </div>
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">JWT Secret</label>
-                    <input 
-                      type="password" 
-                      value={localSettings.JWT_SECRET || ''}
-                      onChange={(e) => setLocalSettings({...localSettings, JWT_SECRET: e.target.value})}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
-                    />
+                </div>
+              )}
+            </div>
+
+            {/* Format Configuration Group */}
+            <div className="space-y-4 pt-4 border-t border-white/5">
+              <button 
+                onClick={() => toggleSection('formats')}
+                className="w-full flex items-center justify-between group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-6 h-6 rounded-lg bg-[#ff8c00]/10 flex items-center justify-center">
+                    <Hash size={12} className="text-[#ff8c00]" />
+                  </div>
+                  <h5 className="text-[8px] font-black text-[#ff8c00] uppercase tracking-widest">Cấu hình Định dạng</h5>
+                </div>
+                {expandedSections.formats ? <ChevronUp size={12} className="text-gray-500" /> : <ChevronDown size={12} className="text-gray-500" />}
+              </button>
+
+              {expandedSections.formats && (
+                <div className="space-y-4 pl-9 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Định dạng Mã Hợp Đồng</label>
+                      <input 
+                        type="text" 
+                        value={localSettings.CONTRACT_CODE_FORMAT || ''}
+                        onChange={(e) => setLocalSettings({...localSettings, CONTRACT_CODE_FORMAT: e.target.value})}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
+                        placeholder="Ví dụ: HD-{RANDOM}"
+                      />
+                      <p className="text-[7px] text-gray-500 italic">Sử dụng {'{RANDOM}'} để tạo mã ngẫu nhiên.</p>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Định dạng ID User</label>
+                      <input 
+                        type="text" 
+                        value={localSettings.USER_ID_FORMAT || ''}
+                        onChange={(e) => setLocalSettings({...localSettings, USER_ID_FORMAT: e.target.value})}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
+                        placeholder="Ví dụ: US-{RANDOM}"
+                      />
+                      <p className="text-[7px] text-gray-500 italic">Sử dụng {'{RANDOM}'} để tạo mã ngẫu nhiên.</p>
+                    </div>
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Quick Actions / Copy Buttons */}
+            {/* Payment & Content Group */}
+            <div className="space-y-4 pt-4 border-t border-white/5">
+              <button 
+                onClick={() => toggleSection('payment')}
+                className="w-full flex items-center justify-between group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-6 h-6 rounded-lg bg-[#ff8c00]/10 flex items-center justify-center">
+                    <CreditCard size={12} className="text-[#ff8c00]" />
+                  </div>
+                  <h5 className="text-[8px] font-black text-[#ff8c00] uppercase tracking-widest">Thanh toán & Nội dung</h5>
+                </div>
+                {expandedSections.payment ? <ChevronUp size={12} className="text-gray-500" /> : <ChevronDown size={12} className="text-gray-500" />}
+              </button>
+
+              {expandedSections.payment && (
+                <div className="space-y-6 pl-9 animate-in fade-in slide-in-from-top-1 duration-200">
+                  {/* Payment Account */}
+                  <div className="space-y-4">
+                    <h6 className="text-[7px] font-black text-gray-500 uppercase tracking-[0.2em]">Tài khoản nhận thanh toán</h6>
+                    <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
+                      <div className="grid grid-cols-2 gap-2">
+                        <BankSearchableSelect 
+                          value={localSettings.PAYMENT_ACCOUNT?.bankName || ''}
+                          onChange={(bankName, bin) => setLocalSettings({
+                            ...localSettings, 
+                            PAYMENT_ACCOUNT: { ...(localSettings.PAYMENT_ACCOUNT || {}), bankName, bankBin: bin }
+                          })}
+                          className="w-full"
+                        />
+                        <input 
+                          type="text" 
+                          inputMode="numeric"
+                          value={localSettings.PAYMENT_ACCOUNT?.accountNumber || ''}
+                          onChange={(e) => setLocalSettings({
+                            ...localSettings, 
+                            PAYMENT_ACCOUNT: { ...(localSettings.PAYMENT_ACCOUNT || {}), accountNumber: e.target.value.replace(/\D/g, '') }
+                          })}
+                          className="bg-black border border-white/10 rounded-xl px-3 py-2 text-[9px] font-bold text-white outline-none"
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <input 
+                          type="text" 
+                          value={localSettings.PAYMENT_ACCOUNT?.accountName || ''}
+                          onChange={(e) => setLocalSettings({
+                            ...localSettings, 
+                            PAYMENT_ACCOUNT: { ...(localSettings.PAYMENT_ACCOUNT || {}), accountName: e.target.value.toUpperCase() }
+                          })}
+                          className="flex-1 bg-black border border-white/10 rounded-xl px-3 py-2 text-[9px] font-black text-[#ff8c00] uppercase outline-none"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Payment Content */}
+                  <div className="space-y-4 pt-4 border-t border-white/5">
+                    <h6 className="text-[7px] font-black text-gray-500 uppercase tracking-[0.2em]">Nội dung thanh toán PayOS</h6>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Tất toán tất cả</label>
+                        <input 
+                          type="text" 
+                          value={localSettings.PAYMENT_CONTENT_FULL_SETTLEMENT || ''}
+                          onChange={(e) => setLocalSettings({...localSettings, PAYMENT_CONTENT_FULL_SETTLEMENT: e.target.value})}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Tất toán 1 phần</label>
+                        <input 
+                          type="text" 
+                          value={localSettings.PAYMENT_CONTENT_PARTIAL_SETTLEMENT || ''}
+                          onChange={(e) => setLocalSettings({...localSettings, PAYMENT_CONTENT_PARTIAL_SETTLEMENT: e.target.value})}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Gia hạn</label>
+                        <input 
+                          type="text" 
+                          value={localSettings.PAYMENT_CONTENT_EXTENSION || ''}
+                          onChange={(e) => setLocalSettings({...localSettings, PAYMENT_CONTENT_EXTENSION: e.target.value})}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Nâng hạng</label>
+                        <input 
+                          type="text" 
+                          value={localSettings.PAYMENT_CONTENT_UPGRADE || ''}
+                          onChange={(e) => setLocalSettings({...localSettings, PAYMENT_CONTENT_UPGRADE: e.target.value})}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-bold text-white focus:border-[#ff8c00] outline-none transition-all"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Utilities & Tools Group */}
             <div className="space-y-4 pt-6 border-t border-white/5">
               <button 
                 onClick={() => toggleSection('tools')}
                 className="w-full flex items-center justify-between group"
               >
-                <h5 className="text-[8px] font-black text-[#ff8c00] uppercase tracking-widest">Tiện ích & Công cụ</h5>
+                <div className="flex items-center gap-3">
+                  <div className="w-6 h-6 rounded-lg bg-[#ff8c00]/10 flex items-center justify-center">
+                    <Wrench size={12} className="text-[#ff8c00]" />
+                  </div>
+                  <h5 className="text-[8px] font-black text-[#ff8c00] uppercase tracking-widest">Tiện ích & Công cụ</h5>
+                </div>
                 {expandedSections.tools ? <ChevronUp size={12} className="text-gray-500" /> : <ChevronDown size={12} className="text-gray-500" />}
               </button>
 
               {expandedSections.tools && (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 animate-in fade-in slide-in-from-top-1 duration-200">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pl-9 animate-in fade-in slide-in-from-top-1 duration-200">
                   <button
                     onClick={() => copyToClipboard(sqlSchema, 'sql')}
                     className="flex items-center justify-between px-4 py-3 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 transition-all group"
@@ -688,7 +887,7 @@ ON CONFLICT (key) DO NOTHING;`;
                   </button>
 
                   <button
-                    onClick={() => copyToClipboard(`${localSettings.APP_URL || window.location.origin}/api/payment/webhook`, 'webhook')}
+                    onClick={() => copyToClipboard(`${window.location.origin}/api/payment/webhook`, 'webhook')}
                     className="flex items-center justify-between px-4 py-3 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 transition-all group"
                   >
                     <div className="flex items-center gap-3">
@@ -701,85 +900,27 @@ ON CONFLICT (key) DO NOTHING;`;
                       <Copy size={14} className="text-gray-500 group-hover:text-white transition-colors" />
                     )}
                   </button>
-
-                  <button
-                    onClick={() => copyToClipboard(localSettings.APP_URL || window.location.origin, 'appurl')}
-                    className="flex items-center justify-between px-4 py-3 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 transition-all group"
-                  >
-                    <div className="flex items-center gap-3">
-                      <Settings size={14} className="text-[#ff8c00]" />
-                      <span className="text-[9px] font-black text-white uppercase tracking-widest">Lấy App URL</span>
-                    </div>
-                    {copiedField === 'appurl' ? (
-                      <Check size={14} className="text-green-500" />
-                    ) : (
-                      <Copy size={14} className="text-gray-500 group-hover:text-white transition-colors" />
-                    )}
-                  </button>
                 </div>
               )}
             </div>
 
-            {/* Payment Account Config */}
+            {/* Fees & Limits Group */}
             <div className="space-y-4 pt-4 border-t border-white/5">
-              <button 
-                onClick={() => toggleSection('payment')}
-                className="w-full flex items-center justify-between group"
-              >
-                <h5 className="text-[8px] font-black text-[#ff8c00] uppercase tracking-widest">Tài khoản nhận thanh toán</h5>
-                {expandedSections.payment ? <ChevronUp size={12} className="text-gray-500" /> : <ChevronDown size={12} className="text-gray-500" />}
-              </button>
-
-              {expandedSections.payment && (
-                <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3 animate-in fade-in slide-in-from-top-1 duration-200">
-                  <div className="grid grid-cols-2 gap-2">
-                    <BankSearchableSelect 
-                      value={localSettings.PAYMENT_ACCOUNT?.bankName || ''}
-                      onChange={(bankName, bin) => setLocalSettings({
-                        ...localSettings, 
-                        PAYMENT_ACCOUNT: { ...(localSettings.PAYMENT_ACCOUNT || {}), bankName, bankBin: bin }
-                      })}
-                      className="w-full"
-                    />
-                    <input 
-                      type="text" 
-                      inputMode="numeric"
-                      value={localSettings.PAYMENT_ACCOUNT?.accountNumber || ''}
-                      onChange={(e) => setLocalSettings({
-                        ...localSettings, 
-                        PAYMENT_ACCOUNT: { ...(localSettings.PAYMENT_ACCOUNT || {}), accountNumber: e.target.value.replace(/\D/g, '') }
-                      })}
-                      className="bg-black border border-white/10 rounded-xl px-3 py-2 text-[9px] font-bold text-white outline-none"
-                    />
-                  </div>
-                  <div className="flex gap-2">
-                    <input 
-                      type="text" 
-                      value={localSettings.PAYMENT_ACCOUNT?.accountName || ''}
-                      onChange={(e) => setLocalSettings({
-                        ...localSettings, 
-                        PAYMENT_ACCOUNT: { ...(localSettings.PAYMENT_ACCOUNT || {}), accountName: e.target.value.toUpperCase() }
-                      })}
-                      className="flex-1 bg-black border border-white/10 rounded-xl px-3 py-2 text-[9px] font-black text-[#ff8c00] uppercase outline-none"
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-            <div className="space-y-6 pt-6 border-t border-white/5">
               <button 
                 onClick={() => toggleSection('fees')}
                 className="w-full flex items-center justify-between group"
               >
-                <h5 className="text-[8px] font-black text-[#ff8c00] uppercase tracking-widest flex items-center gap-2">
-                  <div className="w-1 h-3 bg-[#ff8c00] rounded-full" />
-                  Phí & Hạn mức
-                </h5>
+                <div className="flex items-center gap-3">
+                  <div className="w-6 h-6 rounded-lg bg-[#ff8c00]/10 flex items-center justify-center">
+                    <TrendingUp size={12} className="text-[#ff8c00]" />
+                  </div>
+                  <h5 className="text-[8px] font-black text-[#ff8c00] uppercase tracking-widest">Phí & Hạn mức</h5>
+                </div>
                 {expandedSections.fees ? <ChevronUp size={12} className="text-gray-500" /> : <ChevronDown size={12} className="text-gray-500" />}
               </button>
               
               {expandedSections.fees && (
-                <div className="grid grid-cols-2 gap-x-3 gap-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                <div className="grid grid-cols-2 gap-x-3 gap-y-4 pl-9 animate-in fade-in slide-in-from-top-1 duration-200">
                   {/* Row 1 */}
                   <div className="flex flex-col gap-1.5">
                     <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest px-1">Phí giải ngân (%)</label>

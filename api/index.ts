@@ -84,7 +84,10 @@ const loadSystemSettings = async (client: any) => {
         'UPGRADE_PERCENT', 'FINE_RATE', 'MAX_FINE_PERCENT', 
         'MAX_LOAN_PER_CYCLE', 'MIN_SYSTEM_BUDGET', 'MAX_SINGLE_LOAN_AMOUNT',
         'IMGBB_API_KEY', 'PAYOS_CLIENT_ID', 'PAYOS_API_KEY', 'PAYOS_CHECKSUM_KEY',
-        'APP_URL', 'JWT_SECRET', 'ADMIN_PHONE', 'ADMIN_PASSWORD'
+        'APP_URL', 'JWT_SECRET', 'ADMIN_PHONE', 'ADMIN_PASSWORD',
+        'PAYMENT_CONTENT_FULL_SETTLEMENT', 'PAYMENT_CONTENT_PARTIAL_SETTLEMENT',
+        'PAYMENT_CONTENT_EXTENSION', 'PAYMENT_CONTENT_UPGRADE',
+        'CONTRACT_CODE_FORMAT', 'USER_ID_FORMAT'
       ];
       if (systemKeys.includes(item.key)) {
         settings[item.key] = item.value;
@@ -121,7 +124,13 @@ const getMergedSettings = async (client: any) => {
     APP_URL: dbSettings.APP_URL || config.APP_URL || process.env.APP_URL || "",
     JWT_SECRET: dbSettings.JWT_SECRET || config.JWT_SECRET || process.env.JWT_SECRET || "ndv-money-secret-key-2026",
     ADMIN_PHONE: dbSettings.ADMIN_PHONE || config.ADMIN_PHONE || process.env.ADMIN_PHONE || '0877203996',
-    ADMIN_PASSWORD: dbSettings.ADMIN_PASSWORD || config.ADMIN_PASSWORD || process.env.ADMIN_PASSWORD || '119011Ngon'
+    ADMIN_PASSWORD: dbSettings.ADMIN_PASSWORD || config.ADMIN_PASSWORD || process.env.ADMIN_PASSWORD || '119011Ngon',
+    PAYMENT_CONTENT_FULL_SETTLEMENT: dbSettings.PAYMENT_CONTENT_FULL_SETTLEMENT || config.PAYMENT_CONTENT_FULL_SETTLEMENT || "TAT TOAN TAT CA",
+    PAYMENT_CONTENT_PARTIAL_SETTLEMENT: dbSettings.PAYMENT_CONTENT_PARTIAL_SETTLEMENT || config.PAYMENT_CONTENT_PARTIAL_SETTLEMENT || "TAT TOAN 1 PHAN",
+    PAYMENT_CONTENT_EXTENSION: dbSettings.PAYMENT_CONTENT_EXTENSION || config.PAYMENT_CONTENT_EXTENSION || "GIA HAN",
+    PAYMENT_CONTENT_UPGRADE: dbSettings.PAYMENT_CONTENT_UPGRADE || config.PAYMENT_CONTENT_UPGRADE || "NANG HANG",
+    CONTRACT_CODE_FORMAT: dbSettings.CONTRACT_CODE_FORMAT || config.CONTRACT_CODE_FORMAT || "HD-{RANDOM}",
+    USER_ID_FORMAT: dbSettings.USER_ID_FORMAT || config.USER_ID_FORMAT || "US-{RANDOM}"
   };
 };
 
@@ -1053,7 +1062,8 @@ const USER_COLUMNS = [
   'rankProgress', 'isLoggedIn', 'isAdmin', 'pendingUpgradeRank', 
   'rankUpgradeBill', 'address', 'joinDate', 'idFront', 'idBack', 
   'refZalo', 'relationship', 'lastLoanSeq', 'bankName', 
-  'bankAccountNumber', 'bankAccountHolder', 'hasJoinedZalo', 'updatedAt'
+  'bankAccountNumber', 'bankAccountHolder', 'hasJoinedZalo', 
+  'payosOrderCode', 'payosCheckoutUrl', 'payosAmount', 'payosExpireAt', 'updatedAt'
 ];
 
 const USER_WRITE_COLUMNS = [...USER_COLUMNS, 'password'];
@@ -1068,7 +1078,8 @@ const USER_SUMMARY_COLUMNS = [
 const LOAN_COLUMNS = [
   'id', 'userId', 'userName', 'amount', 'date', 'createdAt', 'status', 
   'fine', 'billImage', 'bankTransactionId', 'signature', 'rejectionReason', 
-  'settlementType', 'partialAmount', 'principalPaymentCount', 'extensionCount', 'updatedAt'
+  'settlementType', 'partialAmount', 'principalPaymentCount', 'extensionCount', 
+  'payosOrderCode', 'payosCheckoutUrl', 'payosAmount', 'payosExpireAt', 'updatedAt'
 ];
 
 const LOAN_SUMMARY_COLUMNS = [
@@ -1324,39 +1335,83 @@ router.get("/api-health", (req, res) => {
 // Create Payment Link
 router.post("/payment/create-link", async (req, res) => {
   try {
-    const { loanId, amount, description } = req.body;
+    const { type, id, amount, description, targetRank, screen, settleType, partialAmount } = req.body; // type: 'SETTLE' | 'UPGRADE', id: loanId or userId
     
-    if (!loanId || !amount) {
-      return res.status(400).json({ error: "Thiếu thông tin khoản vay hoặc số tiền" });
+    if (!id || !amount) {
+      return res.status(400).json({ error: "Thiếu thông tin hoặc số tiền" });
     }
 
     const client = initSupabase();
+    
+    // Check for existing valid link to save quota
+    if (type === 'SETTLE') {
+      const { data: loan } = await client.from('loans').select('payosCheckoutUrl, payosExpireAt, payosOrderCode, payosAmount, settlementType, partialAmount').eq('id', id).single();
+      if (loan && loan.payosCheckoutUrl && loan.payosExpireAt > Date.now() && Number(loan.payosAmount) === Number(amount) && loan.settlementType === settleType && Number(loan.partialAmount || 0) === Number(partialAmount || 0)) {
+        return res.json({ 
+          success: true, 
+          checkoutUrl: loan.payosCheckoutUrl,
+          orderCode: loan.payosOrderCode
+        });
+      }
+    } else if (type === 'UPGRADE') {
+      const { data: user } = await client.from('users').select('payosCheckoutUrl, payosExpireAt, payosOrderCode, payosAmount').eq('id', id).single();
+      if (user && user.payosCheckoutUrl && user.payosExpireAt > Date.now() && Number(user.payosAmount) === Number(amount)) {
+        return res.json({ 
+          success: true, 
+          checkoutUrl: user.payosCheckoutUrl,
+          orderCode: user.payosOrderCode
+        });
+      }
+    }
+
     const settings = await getMergedSettings(client);
     const payosInstance = getPayOS(settings);
 
-    // PayOS orderCode must be a number. We'll use a numeric part of the loanId or a random number.
-    // Let's use a timestamp + random to ensure uniqueness if needed, but we need to map it back.
-    // Actually, PayOS allows up to 10 digits for orderCode.
     const orderCode = Number(Date.now().toString().slice(-9));
-
     const domain = settings.APP_URL || `http://localhost:3000`;
+    const expireAt = Date.now() + 15 * 60 * 1000; // 15 mins
     
+    let finalDescription = description;
+    if (!finalDescription) {
+      if (type === 'UPGRADE') {
+        finalDescription = `Nang cap ${id} to ${targetRank}`;
+      } else {
+        // Format: "TT {settleType} {loanId}"
+        finalDescription = `TT ${settleType || 'ALL'} ${id}`;
+      }
+    }
+
     const body = {
       orderCode: orderCode,
       amount: Number(amount),
-      description: description || `Tat toan ${loanId}`,
-      cancelUrl: `${domain}/dashboard`,
-      returnUrl: `${domain}/dashboard?payment=success&loanId=${loanId}`,
-      // Store loanId in metadata if supported, or we'll have to use a mapping table.
-      // PayOS doesn't have a direct metadata field in createPaymentLink, 
-      // so we use the description or a mapping.
-      // For simplicity in this demo, we'll assume the description contains the loanId.
+      description: finalDescription,
+      cancelUrl: `${domain}/dashboard?payment=cancel&screen=${screen || ''}`,
+      returnUrl: `${domain}/dashboard?payment=success&type=${type}&id=${id}&screen=${screen || ''}`,
     };
 
     const paymentLinkResponse = await payosInstance.paymentRequests.create(body);
     
-    // In a real app, you'd save the mapping between orderCode and loanId in your DB.
-    // Here we'll just return the link.
+    // Save link info to DB
+    if (type === 'SETTLE') {
+      await client.from('loans').update({ 
+        payosCheckoutUrl: paymentLinkResponse.checkoutUrl,
+        payosOrderCode: orderCode,
+        payosAmount: Number(amount),
+        payosExpireAt: expireAt,
+        settlementType: settleType || 'ALL',
+        partialAmount: partialAmount || null,
+        updatedAt: Date.now()
+      }).eq('id', id);
+    } else if (type === 'UPGRADE') {
+      await client.from('users').update({ 
+        payosCheckoutUrl: paymentLinkResponse.checkoutUrl,
+        payosOrderCode: orderCode,
+        payosAmount: Number(amount),
+        payosExpireAt: expireAt,
+        updatedAt: Date.now()
+      }).eq('id', id);
+    }
+
     res.json({ 
       success: true, 
       checkoutUrl: paymentLinkResponse.checkoutUrl,
@@ -1384,58 +1439,153 @@ router.post("/payment/webhook", async (req, res) => {
     if (webhookData.code === '00') {
       const orderCode = webhookData.orderCode;
       const amount = webhookData.amount;
-      const description = webhookData.description; // "Tat toan LOAN_ID"
+      const description = webhookData.description; 
       
-      // Extract loanId from description
-      const loanIdMatch = description.match(/Tat toan (.*)/);
-      const loanId = loanIdMatch ? loanIdMatch[1] : null;
-
-      if (loanId) {
-        // 1. Get the loan details
-        const { data: loan, error: loanError } = await client
-          .from('loans')
-          .select('*')
-          .eq('id', loanId)
-          .single();
-          
-        if (loan && !loanError) {
-          // 2. Update loan status to 'SETTLED'
-          const { error: updateError } = await client
+      // Handle Loan Settlement
+      if (description.startsWith("TT ")) {
+        // Format: "TT {settleType} {loanId}"
+        const parts = description.split(" ");
+        const settleType = parts[1]; // ALL, PARTIAL, PRINCIPAL
+        const loanId = parts[2];
+        
+        if (loanId) {
+          const { data: loan, error: loanError } = await client
             .from('loans')
-            .update({ 
-              status: 'SETTLED', 
-              settledAt: new Date().toISOString(),
-              updatedAt: Date.now()
-            })
-            .eq('id', loanId);
+            .select('*')
+            .eq('id', loanId)
+            .single();
             
-          if (!updateError) {
-            // 3. Update user balance (restore limit)
-            const { data: user, error: userError } = await client
-              .from('users')
-              .select('balance, totalLimit')
-              .eq('id', loan.userId)
-              .single();
+          if (loan && !loanError) {
+            // 1. Mark current loan as settled
+            const { error: updateError } = await client
+              .from('loans')
+              .update({ 
+                status: 'ĐÃ TẤT TOÁN', 
+                settledAt: new Date().toISOString(),
+                updatedAt: Date.now()
+              })
+              .eq('id', loanId);
               
-            if (user && !userError) {
-              const newBalance = (user.balance || 0) + loan.amount;
-              await client
+            if (!updateError) {
+              const { data: user, error: userError } = await client
                 .from('users')
-                .update({ balance: newBalance, updatedAt: Date.now() })
-                .eq('id', loan.userId);
+                .select('*')
+                .eq('id', loan.userId)
+                .single();
                 
-              // 4. Notify client via Socket.io
+              if (user && !userError) {
+                // 2. Handle different settlement types
+                if (settleType === 'ALL') {
+                  // Full Settlement: Restore balance
+                  const newBalance = Math.min(user.totalLimit, (user.balance || 0) + loan.amount);
+                  const newRankProgress = Math.min(10, (user.rankProgress || 0) + 1);
+                  await client
+                    .from('users')
+                    .update({ balance: newBalance, rankProgress: newRankProgress, updatedAt: Date.now() })
+                    .eq('id', loan.userId);
+                } else {
+                  // PRINCIPAL (Gia hạn) or PARTIAL (TTMP): Create next cycle loan
+                  const nextCount = (loan.principalPaymentCount || 0) + 1;
+                  const nextExtensionCount = settleType === 'PRINCIPAL' ? (loan.extensionCount || 0) + 1 : (loan.extensionCount || 0);
+                  const suffix = settleType === 'PRINCIPAL' ? 'GH' : 'TTMP';
+                  
+                  const idParts = loan.id.split('-');
+                  const baseId = `${idParts[0]}-${idParts[1]}`;
+                  const newId = `${baseId}-${suffix}-${nextCount}`;
+                  
+                  // Calculate new due date (1st of next month)
+                  const [d, m, y] = loan.date.split('/').map(Number);
+                  const currentDueDate = new Date(y, m - 1, d);
+                  const nextCycleDate = new Date(currentDueDate.getFullYear(), currentDueDate.getMonth() + 1, 1);
+                  const dayStr = nextCycleDate.getDate().toString().padStart(2, '0');
+                  const monthStr = (nextCycleDate.getMonth() + 1).toString().padStart(2, '0');
+                  const newDueDate = `${dayStr}/${monthStr}/${nextCycleDate.getFullYear()}`;
+                  
+                  const nextLoanAmount = settleType === 'PARTIAL' ? (loan.amount - (loan.partialAmount || 0)) : loan.amount;
+                  
+                  const nextLoan = {
+                    ...loan,
+                    id: newId,
+                    status: 'ĐANG NỢ',
+                    date: newDueDate,
+                    amount: nextLoanAmount,
+                    principalPaymentCount: nextCount,
+                    extensionCount: nextExtensionCount,
+                    billImage: null,
+                    settlementType: null,
+                    partialAmount: null,
+                    fine: 0,
+                    payosOrderCode: null,
+                    payosCheckoutUrl: null,
+                    payosExpireAt: null,
+                    updatedAt: Date.now()
+                  };
+                  
+                  await client.from('loans').insert([nextLoan]);
+                  
+                  // Update user rank progress and balance if partial
+                  let newBalance = user.balance;
+                  if (settleType === 'PARTIAL') {
+                    newBalance = Math.min(user.totalLimit, (user.balance || 0) + (loan.partialAmount || 0));
+                  }
+                  const newRankProgress = Math.min(10, (user.rankProgress || 0) + 1);
+                  await client
+                    .from('users')
+                    .update({ balance: newBalance, rankProgress: newRankProgress, updatedAt: Date.now() })
+                    .eq('id', loan.userId);
+                }
+                
+                const io = req.app.get("io");
+                if (io) {
+                  io.to(`user_${loan.userId}`).emit("payment_success", { 
+                    loanId, 
+                    amount, 
+                    message: `Khoản vay của bạn đã được ${settleType === 'ALL' ? 'tất toán' : (settleType === 'PARTIAL' ? 'thanh toán một phần' : 'gia hạn')} tự động!` 
+                  });
+                  io.to("admin").emit("admin_notification", {
+                    type: "PAYMENT",
+                    message: `Người dùng ${loan.userId} đã ${settleType === 'ALL' ? 'tất toán' : (settleType === 'PARTIAL' ? 'TTMP' : 'gia hạn')} khoản vay ${loanId} qua PayOS.`
+                  });
+                }
+              }
+            }
+          }
+        }
+      } 
+      // Handle Rank Upgrade
+      else if (description.startsWith("Nang cap ")) {
+        // Format: "Nang cap USER_ID to RANK_ID"
+        const parts = description.replace("Nang cap ", "").split(" to ");
+        const userId = parts[0];
+        const targetRank = parts[1];
+
+        if (userId && targetRank) {
+          const { data: user, error: userError } = await client
+            .from('users')
+            .select('*')
+            .eq('id', userId)
+            .single();
+
+          if (user && !userError) {
+            // Update user rank
+            const { error: updateError } = await client
+              .from('users')
+              .update({ 
+                rank: targetRank,
+                updatedAt: Date.now()
+              })
+              .eq('id', userId);
+
+            if (!updateError) {
               const io = req.app.get("io");
               if (io) {
-                io.to(`user_${loan.userId}`).emit("payment_success", { 
-                  loanId, 
-                  amount, 
-                  message: "Khoản vay của bạn đã được tất toán tự động!" 
+                io.to(`user_${userId}`).emit("rank_upgraded", { 
+                  rank: targetRank,
+                  message: `Chúc mừng! Bạn đã được nâng hạng lên ${targetRank.toUpperCase()} tự động!` 
                 });
-                // Also notify admin
                 io.to("admin").emit("admin_notification", {
-                  type: "PAYMENT",
-                  message: `Người dùng ${loan.userId} đã tất toán khoản vay ${loanId} qua PayOS.`
+                  type: "RANK_UPGRADE",
+                  message: `Người dùng ${userId} đã nâng hạng lên ${targetRank.toUpperCase()} qua PayOS.`
                 });
               }
             }
@@ -1447,8 +1597,6 @@ router.post("/payment/webhook", async (req, res) => {
     res.json({ status: "ok" });
   } catch (e: any) {
     console.error("PayOS Webhook Error:", e);
-    // PayOS expects a 200 response even if processing fails, 
-    // but we should log it.
     res.json({ status: "error", message: e.message });
   }
 });

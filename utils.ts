@@ -53,14 +53,26 @@ export const calculateFine = (amount: number, dueDateStr: string, fineRate = 0.0
 };
 
 /**
- * Sinh mã hợp đồng duy nhất
- * Định dạng: [4 ký tự cuối UID]-[4 số ngẫu nhiên]
- * Ví dụ: ABCD-5678
+ * Sinh mã hợp đồng duy nhất dựa trên định dạng cấu hình
+ * Mặc định: HD-{RANDOM}
  */
-export const generateContractId = (userId: string): string => {
+export const generateContractId = (userId: string, format = 'HD-{RANDOM}'): string => {
+  const randomPart = Math.floor(1000 + Math.random() * 9000).toString();
   const userPart = userId.slice(-4).toUpperCase();
-  const randomPart = Math.floor(1000 + Math.random() * 9000);
-  return `${userPart}-${randomPart}`;
+  
+  return format
+    .replace('{RANDOM}', randomPart)
+    .replace('{USER}', userPart);
+};
+
+/**
+ * Sinh ID User duy nhất dựa trên định dạng cấu hình
+ * Mặc định: US-{RANDOM}
+ */
+export const generateUserId = (format = 'US-{RANDOM}'): string => {
+  const randomPart = Math.floor(1000 + Math.random() * 9000).toString();
+  
+  return format.replace('{RANDOM}', randomPart);
 };
 
 /**

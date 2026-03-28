@@ -16,7 +16,7 @@ import AdminUserManagement from './components/AdminUserManagement';
 import AdminBudget from './components/AdminBudget';
 import AdminSystem from './components/AdminSystem';
 import { User as UserIcon, Home, Briefcase, Medal, LayoutGrid, Users, Wallet, AlertTriangle, X, Database, Settings, RefreshCcw } from 'lucide-react';
-import { compressImage, generateContractId, uploadToImgBB } from './utils';
+import { compressImage, generateContractId, generateUserId, uploadToImgBB } from './utils';
 import BankUpdateWarning from './components/BankUpdateWarning';
 import DatabaseErrorModal from './components/DatabaseErrorModal';
 import { io, Socket } from 'socket.io-client';
@@ -77,7 +77,7 @@ const App: React.FC = () => {
     return localStorage.getItem('vnv_token');
   });
 
-  const handlePayOSSettle = async (loan: LoanRecord) => {
+  const handlePayOSPayment = async (type: 'SETTLE' | 'UPGRADE', id: string, amount: number, targetRank?: string, settleType?: string, partialAmount?: number) => {
     if (isPayOSProcessing) return;
     setIsPayOSProcessing(true);
     setIsGlobalProcessing(true);
@@ -86,9 +86,13 @@ const App: React.FC = () => {
       const response = await authenticatedFetch('/api/payment/create-link', {
         method: 'POST',
         body: JSON.stringify({
-          loanId: loan.id,
-          amount: loan.amount + (loan.fine || 0),
-          description: `Tat toan ${loan.id}`
+          type,
+          id,
+          amount,
+          targetRank,
+          settleType,
+          partialAmount,
+          screen: currentView
         })
       });
       
@@ -100,7 +104,7 @@ const App: React.FC = () => {
         alert("Không thể tạo link thanh toán. Vui lòng thử lại sau.");
       }
     } catch (e) {
-      console.error("PayOS Settle Error:", e);
+      console.error("PayOS Payment Error:", e);
       alert("Đã xảy ra lỗi khi kết nối với cổng thanh toán.");
     } finally {
       setIsPayOSProcessing(false);
@@ -590,6 +594,31 @@ const App: React.FC = () => {
     };
   }, [user?.id, user?.isAdmin, token]);
 
+  // Handle PayOS return/cancel parameters
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const payment = params.get('payment');
+    const screen = params.get('screen') as AppView;
+    
+    if (payment && screen) {
+      if (Object.values(AppView).includes(screen)) {
+        setCurrentView(screen);
+      }
+      
+      if (payment === 'success') {
+        // Show success message or handle success state if needed
+        // The real-time update from webhook will handle the data change
+        console.log('[PAYOS] Payment success return');
+      } else if (payment === 'cancel') {
+        console.log('[PAYOS] Payment cancel return');
+      }
+      
+      // Clean up URL parameters without refreshing
+      const newUrl = window.location.pathname;
+      window.history.replaceState({}, '', newUrl);
+    }
+  }, []);
+
   // Re-join room when user changes
   useEffect(() => {
     if (socketRef.current && socketRef.current.connected && user) {
@@ -823,7 +852,7 @@ const App: React.FC = () => {
         return;
       }
 
-      const newUserId = Math.floor(1000 + Math.random() * 9000).toString();
+      const newUserId = generateUserId(settings.USER_ID_FORMAT || 'US-{RANDOM}');
       
       // Tải ảnh lên ImgBB để tiết kiệm dung lượng Supabase (Egress Quota)
       let idFrontUrl = userData.idFront;
@@ -1052,7 +1081,7 @@ const App: React.FC = () => {
       
       // Logic tạo Mã hợp đồng: Sử dụng hàm sinh mã duy nhất
       const nextSeq = (user.lastLoanSeq || 0) + 1;
-      const contractId = generateContractId(user.id);
+      const contractId = generateContractId(user.id, settings.CONTRACT_CODE_FORMAT || 'HD-{RANDOM}');
 
       const newLoan: LoanRecord = {
         id: contractId,
@@ -1858,7 +1887,7 @@ const App: React.FC = () => {
               setSettleLoanFromDash(loan);
               setCurrentView(AppView.APPLY_LOAN);
             }}
-            onPayOSSettle={handlePayOSSettle}
+            onPayOSSettle={(loan) => handlePayOSPayment('SETTLE', loan.id, loan.amount + (loan.fine || 0))}
             onViewContract={(loan) => {
               setViewLoanFromDash(loan);
               setCurrentView(AppView.APPLY_LOAN);
@@ -1898,7 +1927,7 @@ const App: React.FC = () => {
             systemBudget={systemBudget} 
             isGlobalProcessing={isGlobalProcessing}
             onApplyLoan={handleApplyLoan} 
-            onSettleLoan={handleSettleLoan} 
+            onPayOSPayment={handlePayOSPayment}
             onBack={() => {
               setSettleLoanFromDash(null);
               setViewLoanFromDash(null);
@@ -1910,7 +1939,7 @@ const App: React.FC = () => {
             settings={settings}
           />
         );
-      case AppView.RANK_LIMITS: return <RankLimits user={user} isGlobalProcessing={isGlobalProcessing} onBack={() => setCurrentView(AppView.DASHBOARD)} onUpgrade={handleUpgradeRank} settings={settings} />;
+      case AppView.RANK_LIMITS: return <RankLimits user={user} isGlobalProcessing={isGlobalProcessing} onBack={() => setCurrentView(AppView.DASHBOARD)} onUpgrade={handleUpgradeRank} onPayOSUpgrade={(rank, amount) => handlePayOSPayment('UPGRADE', user?.id || '', amount, rank)} settings={settings} />;
       case AppView.PROFILE: 
         return (
           <Profile 
@@ -1990,7 +2019,7 @@ const App: React.FC = () => {
               setSettleLoanFromDash(loan);
               setCurrentView(AppView.APPLY_LOAN);
             }}
-            onPayOSSettle={handlePayOSSettle}
+            onPayOSSettle={(loan) => handlePayOSPayment('SETTLE', loan.id, loan.amount + (loan.fine || 0))}
             onViewContract={(loan) => {
               setViewLoanFromDash(loan);
               setCurrentView(AppView.APPLY_LOAN);

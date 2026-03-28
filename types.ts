@@ -45,6 +45,9 @@ export interface User {
   bankAccountNumber?: string;
   bankAccountHolder?: string;
   hasJoinedZalo?: boolean;
+  payosOrderCode?: number;
+  payosCheckoutUrl?: string;
+  payosExpireAt?: number;
   updatedAt?: number;
 }
 
@@ -75,6 +78,9 @@ export interface LoanRecord {
   partialAmount?: number;
   principalPaymentCount?: number;
   extensionCount?: number;
+  payosOrderCode?: number;
+  payosCheckoutUrl?: string;
+  payosExpireAt?: number;
   updatedAt?: number;
 }
 

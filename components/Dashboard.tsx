@@ -323,14 +323,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                            >
                              Tất toán
                            </button>
-                           {onPayOSSettle && (
-                             <button 
-                               onClick={() => onPayOSSettle(item)}
-                               className="bg-orange-500 text-white font-black px-2 py-1.5 rounded-lg text-[7px] uppercase tracking-widest active:scale-95 transition-all"
-                             >
-                               PayOS
-                             </button>
-                           )}
+
                          </div>
                        )}
                     </div>
